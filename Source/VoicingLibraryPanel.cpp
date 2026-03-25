@@ -276,7 +276,9 @@ void VoicingLibraryPanel::updateRecording (const std::vector<int>& activeNotes)
         if (! activeNotes.empty())
         {
             recordState = RecordState::Capturing;
-            capturedNotes = activeNotes;
+            capturedNotes.clear();
+            for (int n : activeNotes)
+                capturedNotes.push_back (n);
             recordingIndicator.setText ("REC - Playing...", juce::dontSendNotification);
         }
         return;
@@ -285,9 +287,19 @@ void VoicingLibraryPanel::updateRecording (const std::vector<int>& activeNotes)
     if (recordState == RecordState::Capturing)
     {
         if (! activeNotes.empty())
-            capturedNotes = activeNotes;
+        {
+            // Accumulate: add any new notes not already captured
+            for (int n : activeNotes)
+            {
+                if (std::find (capturedNotes.begin(), capturedNotes.end(), n) == capturedNotes.end())
+                    capturedNotes.push_back (n);
+            }
+        }
         else
+        {
+            // All notes released — finish with the full accumulated set
             finishRecording();
+        }
     }
 }
 
