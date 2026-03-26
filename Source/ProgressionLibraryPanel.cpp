@@ -495,6 +495,7 @@ void ProgressionLibraryPanel::enterEditing()
     quantQuarterBtn.setToggleState (currentQuantizeResolution == 0.25, juce::dontSendNotification);
 
     editPlayBtn.setButtonText ("Play");
+    editChart.setQuantizeGrid (currentQuantizeResolution);
     editChart.setProgression (&pendingProgression);
 
     resized();
@@ -641,6 +642,7 @@ void ProgressionLibraryPanel::applyQuantize (double resolution)
     quantHalfBtn.setToggleState (resolution == 0.5, juce::dontSendNotification);
     quantQuarterBtn.setToggleState (resolution == 0.25, juce::dontSendNotification);
 
+    editChart.setQuantizeGrid (resolution);
     editChart.setSelectedChord (-1);
     editChart.setProgression (&pendingProgression);
     editChart.repaint();
@@ -661,8 +663,10 @@ void ProgressionLibraryPanel::onEditChordSelected (int index)
     editRootCombo.setSelectedId (chord.rootPitchClass + 1, juce::dontSendNotification);
     editQualityCombo.setSelectedId (editComboIdFromQuality (chord.quality), juce::dontSendNotification);
 
-    // Play the chord via synth preview
+    // Play the chord via synth preview + highlight keyboard
     playChordPreview (chord);
+    if (onChordPreview)
+        onChordPreview (chord.midiNotes);
 }
 
 void ProgressionLibraryPanel::playChordPreview (const ProgressionChord& chord)
@@ -755,7 +759,7 @@ void ProgressionLibraryPanel::onDelete()
     {
         processorRef.progressionLibrary.removeProgression (id);
         progressionList.updateContent();
-        chartPreview.setProgression (nullptr);
+        chartPreview.setProgressionReadOnly (nullptr);
         repaint();
     }
 }
@@ -848,7 +852,7 @@ void ProgressionLibraryPanel::selectedRowsChanged (int)
 {
     auto id = getSelectedProgressionId();
     const auto* prog = processorRef.progressionLibrary.getProgression (id);
-    chartPreview.setProgression (prog);
+    chartPreview.setProgressionReadOnly (prog);
 
     if (onSelectionChanged)
         onSelectionChanged (id);

@@ -7,9 +7,18 @@ ProgressionChartComponent::ProgressionChartComponent()
     setInterceptsMouseClicks (true, false);
 }
 
-void ProgressionChartComponent::setProgression (const Progression* prog)
+void ProgressionChartComponent::setProgression (Progression* prog)
 {
     progression = prog;
+    progressionReadOnly = nullptr;
+    selectedChordIndex = -1;
+    repaint();
+}
+
+void ProgressionChartComponent::setProgressionReadOnly (const Progression* prog)
+{
+    progressionReadOnly = prog;
+    progression = nullptr;
     selectedChordIndex = -1;
     repaint();
 }
@@ -41,6 +50,20 @@ int ProgressionChartComponent::getRowForBeat (double beat) const
     return static_cast<int> (beat) / beatsPerRow;
 }
 
+double ProgressionChartComponent::xToBeat (float x, int row) const
+{
+    float bw = getBeatWidth();
+    double rowStartBeat = row * beatsPerRow;
+    return rowStartBeat + (x - leftPad) / bw;
+}
+
+double ProgressionChartComponent::snapBeat (double beat) const
+{
+    if (quantizeGrid <= 0.0)
+        return beat;
+    return std::round (beat / quantizeGrid) * quantizeGrid;
+}
+
 juce::Rectangle<float> ProgressionChartComponent::getChordRect (
     const ProgressionChord& chord, int row) const
 {
@@ -63,12 +86,13 @@ juce::Rectangle<float> ProgressionChartComponent::getChordRect (
 
 int ProgressionChartComponent::hitTestChord (juce::Point<float> pos) const
 {
-    if (progression == nullptr)
+    auto* prog = getProgression();
+    if (prog == nullptr)
         return -1;
 
-    for (int i = 0; i < static_cast<int> (progression->chords.size()); ++i)
+    for (int i = 0; i < static_cast<int> (prog->chords.size()); ++i)
     {
-        const auto& chord = progression->chords[static_cast<size_t> (i)];
+        const auto& chord = prog->chords[static_cast<size_t> (i)];
         int startRow = getRowForBeat (chord.startBeat);
         int endRow = getRowForBeat (chord.startBeat + chord.durationBeats - 0.01);
 
@@ -83,11 +107,85 @@ int ProgressionChartComponent::hitTestChord (juce::Point<float> pos) const
     return -1;
 }
 
+ProgressionChartComponent::DragEdge ProgressionChartComponent::hitTestEdge (
+    juce::Point<float> pos, int& outChordIndex) const
+{
+    auto* prog = getProgression();
+    if (prog == nullptr || ! editMode)
+        return DragEdge::None;
+
+    for (int i = 0; i < static_cast<int> (prog->chords.size()); ++i)
+    {
+        const auto& chord = prog->chords[static_cast<size_t> (i)];
+        int startRow = getRowForBeat (chord.startBeat);
+        int endRow = getRowForBeat (chord.startBeat + chord.durationBeats - 0.01);
+
+        for (int row = startRow; row <= endRow; ++row)
+        {
+            auto rect = getChordRect (chord, row);
+            if (rect.isEmpty())
+                continue;
+
+            // Check right edge
+            if (std::abs (pos.x - rect.getRight()) < edgeHitZone
+                && pos.y >= rect.getY() && pos.y <= rect.getBottom())
+            {
+                outChordIndex = i;
+                return DragEdge::Right;
+            }
+
+            // Check left edge
+            if (std::abs (pos.x - rect.getX()) < edgeHitZone
+                && pos.y >= rect.getY() && pos.y <= rect.getBottom())
+            {
+                outChordIndex = i;
+                return DragEdge::Left;
+            }
+        }
+    }
+
+    outChordIndex = -1;
+    return DragEdge::None;
+}
+
+void ProgressionChartComponent::mouseMove (const juce::MouseEvent& e)
+{
+    if (! editMode || progression == nullptr)
+    {
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+        return;
+    }
+
+    int idx = -1;
+    auto edge = hitTestEdge (e.position, idx);
+    if (edge != DragEdge::None)
+        setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+    else
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+}
+
 void ProgressionChartComponent::mouseDown (const juce::MouseEvent& e)
 {
-    if (progression == nullptr)
+    auto* prog = getProgression();
+    if (prog == nullptr)
         return;
 
+    // Check for edge drag first (edit mode only)
+    if (editMode && progression != nullptr)
+    {
+        int idx = -1;
+        auto edge = hitTestEdge (e.position, idx);
+        if (edge != DragEdge::None && idx >= 0)
+        {
+            dragEdge = edge;
+            dragChordIndex = idx;
+            dragOrigStartBeat = progression->chords[static_cast<size_t> (idx)].startBeat;
+            dragOrigDuration = progression->chords[static_cast<size_t> (idx)].durationBeats;
+            return;
+        }
+    }
+
+    // Normal click — select chord
     int hit = hitTestChord (e.position);
 
     if (hit != selectedChordIndex)
@@ -100,11 +198,93 @@ void ProgressionChartComponent::mouseDown (const juce::MouseEvent& e)
     }
 }
 
+void ProgressionChartComponent::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragEdge == DragEdge::None || dragChordIndex < 0 || progression == nullptr)
+        return;
+
+    auto& chord = progression->chords[static_cast<size_t> (dragChordIndex)];
+    int row = getRowForBeat (chord.startBeat);
+    double newBeat = snapBeat (xToBeat (e.position.x, row));
+
+    if (dragEdge == DragEdge::Right)
+    {
+        // Resize right edge: change duration
+        double newDuration = newBeat - chord.startBeat;
+        if (newDuration < quantizeGrid)
+            newDuration = quantizeGrid;
+
+        // Don't overlap next chord
+        int nextIdx = dragChordIndex + 1;
+        if (nextIdx < static_cast<int> (progression->chords.size()))
+        {
+            double maxEnd = progression->chords[static_cast<size_t> (nextIdx)].startBeat;
+            if (chord.startBeat + newDuration > maxEnd)
+                newDuration = maxEnd - chord.startBeat;
+        }
+
+        chord.durationBeats = newDuration;
+    }
+    else if (dragEdge == DragEdge::Left)
+    {
+        // Resize left edge: change start and duration together
+        double newStart = newBeat;
+        if (newStart < 0.0)
+            newStart = 0.0;
+
+        // Don't overlap previous chord
+        int prevIdx = dragChordIndex - 1;
+        if (prevIdx >= 0)
+        {
+            auto& prev = progression->chords[static_cast<size_t> (prevIdx)];
+            double minStart = prev.startBeat + prev.durationBeats;
+            if (newStart < minStart)
+                newStart = minStart;
+        }
+
+        double endBeat = chord.startBeat + chord.durationBeats;
+        double newDuration = endBeat - newStart;
+        if (newDuration < quantizeGrid)
+        {
+            newStart = endBeat - quantizeGrid;
+            newDuration = quantizeGrid;
+        }
+
+        chord.startBeat = newStart;
+        chord.durationBeats = newDuration;
+    }
+
+    repaint();
+}
+
+void ProgressionChartComponent::mouseUp (const juce::MouseEvent&)
+{
+    if (dragEdge != DragEdge::None)
+    {
+        dragEdge = DragEdge::None;
+        dragChordIndex = -1;
+
+        // Update total beats
+        if (progression != nullptr)
+        {
+            double maxEnd = 0.0;
+            for (const auto& c : progression->chords)
+                maxEnd = juce::jmax (maxEnd, c.startBeat + c.durationBeats);
+            progression->totalBeats = maxEnd;
+        }
+
+        if (onChordResized)
+            onChordResized();
+    }
+}
+
 void ProgressionChartComponent::paint (juce::Graphics& g)
 {
+    auto* prog = getProgression();
+
     g.fillAll (juce::Colour (ChordyTheme::bgDeepest));
 
-    if (progression == nullptr || progression->chords.empty())
+    if (prog == nullptr || prog->chords.empty())
     {
         g.setColour (juce::Colour (ChordyTheme::textTertiary));
         g.setFont (13.0f);
@@ -113,12 +293,12 @@ void ProgressionChartComponent::paint (juce::Graphics& g)
     }
 
     float bw = getBeatWidth();
-    int beatsPerBar = progression->timeSignatureNum;
-    double totalBeats = progression->totalBeats;
+    int beatsPerBar = prog->timeSignatureNum;
+    if (beatsPerBar <= 0) beatsPerBar = 4;
+    double totalBeats = prog->totalBeats;
     if (totalBeats <= 0.0)
     {
-        // Compute from chords
-        for (const auto& c : progression->chords)
+        for (const auto& c : prog->chords)
             totalBeats = juce::jmax (totalBeats, c.startBeat + c.durationBeats);
     }
     int numRows = juce::jmax (1, static_cast<int> (std::ceil (totalBeats / beatsPerRow)));
@@ -128,13 +308,11 @@ void ProgressionChartComponent::paint (juce::Graphics& g)
     {
         float y = static_cast<float> (row * (rowHeight + rowGap));
 
-        // Row background
         g.setColour (juce::Colour (ChordyTheme::chartGrid));
         g.fillRoundedRectangle (static_cast<float> (leftPad), y,
                                 static_cast<float> (getWidth() - leftPad - rightPad),
                                 static_cast<float> (rowHeight), 4.0f);
 
-        // Bar lines
         g.setColour (juce::Colour (ChordyTheme::chartBarLine));
         for (int beat = 0; beat <= beatsPerRow; beat += beatsPerBar)
         {
@@ -144,9 +322,9 @@ void ProgressionChartComponent::paint (juce::Graphics& g)
     }
 
     // Draw chords
-    for (int i = 0; i < static_cast<int> (progression->chords.size()); ++i)
+    for (int i = 0; i < static_cast<int> (prog->chords.size()); ++i)
     {
-        const auto& chord = progression->chords[static_cast<size_t> (i)];
+        const auto& chord = prog->chords[static_cast<size_t> (i)];
         int startRow = getRowForBeat (chord.startBeat);
         int endRow = getRowForBeat (chord.startBeat + chord.durationBeats - 0.01);
 
@@ -160,7 +338,6 @@ void ProgressionChartComponent::paint (juce::Graphics& g)
             bool isPassing = chord.durationBeats < 1.0;
             bool isSelected = (i == selectedChordIndex);
 
-            // Chord background
             if (isSelected)
                 g.setColour (juce::Colour (ChordyTheme::chartChordSelected));
             else if (isPassing)
@@ -170,14 +347,12 @@ void ProgressionChartComponent::paint (juce::Graphics& g)
 
             g.fillRoundedRectangle (inset, 4.0f);
 
-            // Selection border
             if (isSelected)
             {
                 g.setColour (juce::Colour (ChordyTheme::accent));
                 g.drawRoundedRectangle (inset, 4.0f, 1.5f);
             }
 
-            // Chord name
             g.setColour (juce::Colour (isSelected ? ChordyTheme::textPrimary : ChordyTheme::textSecondary));
             g.setFont (isPassing ? 10.0f : 12.0f);
             g.drawText (chord.getDisplayName(), inset.reduced (2.0f, 0),

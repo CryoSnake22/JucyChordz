@@ -67,6 +67,14 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
       keyboard.repaint();
     }
   };
+  // Progression chord preview → highlight keyboard
+  progressionLibraryPanel.onChordPreview = [this](const std::vector<int>& midiNotes) {
+    keyboard.clearAllColours();
+    for (int note : midiNotes)
+      keyboard.setKeyColour(note, KeyColour::Correct);
+    keyboard.repaint();
+  };
+
   // Tabbed library panel
   libraryTabs.addTab("Voicings", juce::Colour(ChordyTheme::bgSurface), &voicingLibraryPanel, false);
   libraryTabs.addTab("Progressions", juce::Colour(ChordyTheme::bgSurface), &progressionLibraryPanel, false);

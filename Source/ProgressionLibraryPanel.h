@@ -26,6 +26,7 @@ public:
     juce::String getSelectedProgressionId() const;
 
     std::function<void (const juce::String& progressionId)> onSelectionChanged;
+    std::function<void (const std::vector<int>& midiNotes)> onChordPreview;
 
 private:
     // ListBoxModel
