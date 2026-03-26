@@ -181,6 +181,71 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
         lastPlayedNotes.push_back(i + 64);
   }
 
+  // Forward MIDI to progression recorder if active
+  if (progressionRecorder.isRecording())
+    progressionRecorder.processBlock(midiMessages, buffer.getNumSamples());
+
+  // Progression playback — inject chord MIDI events based on beat position
+  if (playbackActive.load(std::memory_order_relaxed)) {
+    double bpm = *apvts.getRawParameterValue("bpm");
+    double samplesPerBeat = getSampleRate() * 60.0 / bpm;
+    int midiCh = channel;
+
+    for (int s = 0; s < buffer.getNumSamples(); ++s) {
+      double beat = playbackSamplePos / samplesPerBeat;
+      playbackBeat.store(beat, std::memory_order_relaxed);
+
+      // Find which chord should be active at this beat
+      int targetChord = -1;
+      for (int ci = 0; ci < static_cast<int>(playbackProgression.chords.size()); ++ci) {
+        const auto& c = playbackProgression.chords[static_cast<size_t>(ci)];
+        if (beat >= c.startBeat && beat < c.startBeat + c.durationBeats) {
+          targetChord = ci;
+          break;
+        }
+      }
+
+      // End of progression
+      if (beat >= playbackProgression.totalBeats) {
+        for (int n : playbackActiveNotes)
+          midiMessages.addEvent(juce::MidiMessage::noteOff(midiCh, n), s);
+        playbackActiveNotes.clear();
+        playbackChordIndex = -1;
+        playbackActive.store(false, std::memory_order_relaxed);
+        playbackNotesLow.store(0, std::memory_order_relaxed);
+        playbackNotesHigh.store(0, std::memory_order_relaxed);
+        break;
+      }
+
+      // Chord changed — send note-offs then note-ons
+      if (targetChord != playbackChordIndex) {
+        for (int n : playbackActiveNotes)
+          midiMessages.addEvent(juce::MidiMessage::noteOff(midiCh, n), s);
+        playbackActiveNotes.clear();
+        playbackChordIndex = targetChord;
+
+        if (targetChord >= 0) {
+          const auto& c = playbackProgression.chords[static_cast<size_t>(targetChord)];
+          for (int n : c.midiNotes) {
+            midiMessages.addEvent(juce::MidiMessage::noteOn(midiCh, n, 0.7f), s);
+            playbackActiveNotes.push_back(n);
+          }
+        }
+
+        // Update playback notes bitfield for GUI keyboard highlighting
+        uint64_t pLow = 0, pHigh = 0;
+        for (int n : playbackActiveNotes) {
+          if (n < 64) pLow |= (uint64_t(1) << n);
+          else        pHigh |= (uint64_t(1) << (n - 64));
+        }
+        playbackNotesLow.store(pLow, std::memory_order_relaxed);
+        playbackNotesHigh.store(pHigh, std::memory_order_relaxed);
+      }
+
+      playbackSamplePos += 1.0;
+    }
+  }
+
   // Merge preview MIDI (voicing preview from GUI thread)
   {
     juce::SpinLock::ScopedLockType lock(previewMidiLock);
@@ -234,11 +299,13 @@ void AudioPluginAudioProcessor::getStateInformation(
     juce::MemoryBlock &destData) {
   auto state = apvts.copyState();
 
-  // Append voicing library and SR state as children
+  // Append voicing library, SR state, and progression library as children
   state.removeChild(state.getChildWithName("VoicingLibrary"), nullptr);
   state.removeChild(state.getChildWithName("SpacedRepetition"), nullptr);
+  state.removeChild(state.getChildWithName("ProgressionLibrary"), nullptr);
   state.appendChild(voicingLibrary.toValueTree(), nullptr);
   state.appendChild(spacedRepetition.toValueTree(), nullptr);
+  state.appendChild(progressionLibrary.toValueTree(), nullptr);
 
   std::unique_ptr<juce::XmlElement> xml(state.createXml());
   copyXmlToBinary(*xml, destData);
@@ -259,7 +326,34 @@ void AudioPluginAudioProcessor::setStateInformation(const void *data,
     if (srTree.isValid())
       spacedRepetition.fromValueTree(srTree);
 
+    auto plTree = state.getChildWithName("ProgressionLibrary");
+    if (plTree.isValid())
+      progressionLibrary.fromValueTree(plTree);
+
     apvts.replaceState(state);
+  }
+}
+
+void AudioPluginAudioProcessor::startProgressionPlayback (const Progression& prog) {
+  stopProgressionPlayback();
+  playbackProgression = prog;
+  playbackChordIndex = -1;
+  playbackActiveNotes.clear();
+  playbackSamplePos = 0.0;
+  playbackBeat.store(0.0, std::memory_order_relaxed);
+  playbackActive.store(true, std::memory_order_relaxed);
+}
+
+void AudioPluginAudioProcessor::stopProgressionPlayback() {
+  if (playbackActive.load(std::memory_order_relaxed)) {
+    playbackActive.store(false, std::memory_order_relaxed);
+    int ch = static_cast<int>(*apvts.getRawParameterValue("midiChannel"));
+    for (int n : playbackActiveNotes)
+      addPreviewMidi(juce::MidiMessage::noteOff(ch, n));
+    playbackActiveNotes.clear();
+    playbackChordIndex = -1;
+    playbackNotesLow.store(0, std::memory_order_relaxed);
+    playbackNotesHigh.store(0, std::memory_order_relaxed);
   }
 }
 

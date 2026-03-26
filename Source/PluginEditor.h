@@ -7,6 +7,7 @@
 #include "PracticePanel.h"
 #include "BeatIndicatorComponent.h"
 #include "PlaceholderPanel.h"
+#include "ProgressionLibraryPanel.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -41,7 +42,7 @@ private:
   // Panels — tabbed library on left, practice on right
   juce::TabbedComponent libraryTabs { juce::TabbedButtonBar::TabsAtTop };
   VoicingLibraryPanel voicingLibraryPanel;
-  PlaceholderPanel progressionsPanel { "Progressions — coming soon" };
+  ProgressionLibraryPanel progressionLibraryPanel;
   PlaceholderPanel melodiesPanel { "Melodies — coming soon" };
   PracticePanel practicePanel;
 

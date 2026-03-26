@@ -63,6 +63,14 @@ namespace ChordyTheme
     constexpr float fontSmall         = 11.0f;
     constexpr float fontMeta          = 10.0f;
 
+    // --- Chart ---
+    constexpr juce::uint32 chartGrid          = 0xFF2A2A2A;
+    constexpr juce::uint32 chartBarLine       = 0xFF4A4A4A;
+    constexpr juce::uint32 chartChordBg       = 0xFF2E2E2E;
+    constexpr juce::uint32 chartChordSelected = 0x44E8A634;
+    constexpr juce::uint32 chartCursor        = 0xAAE8A634;
+    constexpr juce::uint32 chartPassingChord  = 0xFF252525;
+
     // --- Spacing ---
     constexpr int panelPadding        = 12;
     constexpr int sectionGap          = 10;

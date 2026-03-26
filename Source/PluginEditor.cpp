@@ -9,6 +9,7 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
       keyboard(p.keyboardState,
                juce::MidiKeyboardComponent::horizontalKeyboard),
       voicingLibraryPanel(p),
+      progressionLibraryPanel(p),
       practicePanel(p, keyboard) {
 
   setLookAndFeel(&chordyLookAndFeel);
@@ -68,7 +69,7 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
   };
   // Tabbed library panel
   libraryTabs.addTab("Voicings", juce::Colour(ChordyTheme::bgSurface), &voicingLibraryPanel, false);
-  libraryTabs.addTab("Progressions", juce::Colour(ChordyTheme::bgSurface), &progressionsPanel, false);
+  libraryTabs.addTab("Progressions", juce::Colour(ChordyTheme::bgSurface), &progressionLibraryPanel, false);
   libraryTabs.addTab("Melodies", juce::Colour(ChordyTheme::bgSurface), &melodiesPanel, false);
   libraryTabs.setTabBarDepth(28);
   libraryTabs.setOutline(0);
@@ -229,8 +230,24 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
     keyboard.repaint();
   }
 
-  // Update recording state machine
+  // Update recording state machines
   voicingLibraryPanel.updateRecording(notes);
+  progressionLibraryPanel.updateRecording(notes);
+  progressionLibraryPanel.updateTimerCallback();
+
+  // Highlight keyboard during progression playback
+  if (processorRef.isPlayingProgression() && !practicePanel.isPracticing() && previewNotes.empty()) {
+    uint64_t pLow = processorRef.playbackNotesLow.load(std::memory_order_relaxed);
+    uint64_t pHigh = processorRef.playbackNotesHigh.load(std::memory_order_relaxed);
+    keyboard.clearAllColours();
+    for (int i = 0; i < 64; ++i)
+      if (pLow & (uint64_t(1) << i))
+        keyboard.setKeyColour(i, KeyColour::Correct);
+    for (int i = 0; i < 64; ++i)
+      if (pHigh & (uint64_t(1) << i))
+        keyboard.setKeyColour(i + 64, KeyColour::Correct);
+    keyboard.repaint();
+  }
 
   // Update practice mode
   if (practicePanel.isPracticing()) {

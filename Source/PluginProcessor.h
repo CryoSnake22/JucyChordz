@@ -5,6 +5,8 @@
 #include "SpacedRepetition.h"
 #include "TempoEngine.h"
 #include "ChordySynth.h"
+#include "ProgressionModel.h"
+#include "ProgressionRecorder.h"
 #include <atomic>
 #include <mutex>
 
@@ -74,10 +76,31 @@ public:
   // Internal synth (Rhodes-like FM, for audible playback)
   ChordySynth internalSynth;
 
+  // Progression library and recorder
+  ProgressionLibrary progressionLibrary;
+  ProgressionRecorder progressionRecorder;
+
   // Preview MIDI injection — GUI thread pushes, audio thread drains into synth
   void addPreviewMidi (const juce::MidiMessage& msg);
 
+  // Progression playback — GUI thread starts/stops, audio thread drives
+  void startProgressionPlayback (const Progression& prog);
+  void stopProgressionPlayback();
+  bool isPlayingProgression() const { return playbackActive.load (std::memory_order_relaxed); }
+  double getPlaybackBeatPosition() const { return playbackBeat.load (std::memory_order_relaxed); }
+
+  // Lock-free playback note bitfield for keyboard highlighting
+  std::atomic<uint64_t> playbackNotesLow { 0 };
+  std::atomic<uint64_t> playbackNotesHigh { 0 };
+
 private:
+  // Playback state
+  std::atomic<bool> playbackActive { false };
+  std::atomic<double> playbackBeat { 0.0 };
+  Progression playbackProgression;
+  int playbackChordIndex = -1;
+  std::vector<int> playbackActiveNotes;
+  double playbackSamplePos = 0.0;
   juce::SpinLock previewMidiLock;
   juce::MidiBuffer previewMidiBuffer;
   mutable std::mutex lastPlayedNotesMutex;
