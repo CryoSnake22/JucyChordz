@@ -23,6 +23,11 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
   chordDisplayLabel.setJustificationType(juce::Justification::centred);
   addAndMakeVisible(chordDisplayLabel);
 
+  nextRootLabel.setFont(juce::FontOptions(16.0f));
+  nextRootLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF889999));
+  nextRootLabel.setJustificationType(juce::Justification::centred);
+  addAndMakeVisible(nextRootLabel);
+
   // Keyboard — wider keys, proper proportions
   keyboard.setAvailableRange(36, 96); // C2 to C7
   keyboard.setKeyWidth(28.0f);
@@ -113,9 +118,11 @@ void AudioPluginAudioProcessorEditor::resized() {
   auto headerArea = area.removeFromTop(40);
   titleLabel.setBounds(headerArea.reduced(10, 5));
 
-  // Chord display
-  auto chordArea = area.removeFromTop(60);
-  chordDisplayLabel.setBounds(chordArea.reduced(10, 5));
+  // Chord display — big current root + smaller "up next"
+  auto chordArea = area.removeFromTop(80);
+  auto mainChordArea = chordArea.removeFromTop(52);
+  chordDisplayLabel.setBounds(mainChordArea.reduced(10, 0));
+  nextRootLabel.setBounds(chordArea.reduced(10, 0));
 
   // Keyboard
   auto keyboardArea = area.removeFromTop(140);
@@ -143,17 +150,25 @@ void AudioPluginAudioProcessorEditor::resized() {
 void AudioPluginAudioProcessorEditor::timerCallback() {
   auto notes = processorRef.getActiveNotes();
 
-  // During practice, override chord display with practice target
+  // During practice, override chord display with current + next root
   if (practicePanel.isPracticing()) {
-    auto text = practicePanel.getPracticeDisplayText();
-    if (text.isNotEmpty()) {
-      chordDisplayLabel.setText(text, juce::dontSendNotification);
-      chordDisplayLabel.setColour(juce::Label::textColourId,
-                                   practicePanel.getPracticeDisplayColour());
+    auto rootText = practicePanel.getCurrentRootText();
+    chordDisplayLabel.setText(rootText, juce::dontSendNotification);
+    chordDisplayLabel.setColour(juce::Label::textColourId,
+                                 practicePanel.getCurrentRootColour());
+    chordDisplayLabel.setFont(juce::FontOptions(48.0f, juce::Font::bold));
+
+    auto nextText = practicePanel.getNextRootText();
+    if (nextText.isNotEmpty()) {
+      nextRootLabel.setText("Up next...  " + nextText, juce::dontSendNotification);
+      nextRootLabel.setVisible(true);
     } else {
-      chordDisplayLabel.setText("", juce::dontSendNotification);
+      nextRootLabel.setText("", juce::dontSendNotification);
+      nextRootLabel.setVisible(false);
     }
   } else {
+    chordDisplayLabel.setFont(juce::FontOptions(36.0f, juce::Font::bold));
+    nextRootLabel.setVisible(false);
     // Normal chord display — use last-played notes when keys are released
     chordDisplayLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     auto displayNotes = notes.empty() ? processorRef.getLastPlayedNotes() : notes;

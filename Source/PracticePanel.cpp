@@ -246,6 +246,7 @@ void PracticePanel::startPractice (const juce::String& voicingId)
         feedbackLabel.setText ("", juce::dontSendNotification);
         timingFeedbackLabel.setText ("", juce::dontSendNotification);
         currentRootText = "";
+        nextRootText = "";
         currentRootColour = juce::Colours::white;
 
         keyboardRef.clearAllColours();
@@ -256,14 +257,14 @@ void PracticePanel::startPractice (const juce::String& voicingId)
         // Untimed mode: show target immediately
         timedPhase = TimedPhase::Inactive;
         juce::String keyName = ChordDetector::noteNameFromPitchClass (currentChallenge.keyIndex);
-        juce::String chordText = keyName + ChordDetector::qualitySuffix (voicing->quality);
-        targetLabel.setText ("Play: " + chordText, juce::dontSendNotification);
+        targetLabel.setText ("Play: " + keyName, juce::dontSendNotification);
         targetLabel.setColour (juce::Label::textColourId, juce::Colours::white);
         feedbackLabel.setText ("", juce::dontSendNotification);
         timingFeedbackLabel.setText ("", juce::dontSendNotification);
 
         // Show root in grey on main display
-        currentRootText = chordText;
+        currentRootText = keyName;
+        nextRootText = "";
         currentRootColour = juce::Colour (0xFF889999);
 
         // Show target notes on keyboard
@@ -287,6 +288,7 @@ void PracticePanel::stopPractice()
     targetLabel.setColour (juce::Label::textColourId, juce::Colours::white);
     feedbackLabel.setText ("", juce::dontSendNotification);
     currentRootText = {};
+    nextRootText = {};
     currentRootColour = juce::Colours::white;
     timingFeedbackLabel.setText ("", juce::dontSendNotification);
 
@@ -388,18 +390,16 @@ void PracticePanel::updateTimedPractice (const std::vector<int>& activeNotes)
         }
         else
         {
-            // Beats 2-3: show first chord name (prep) — white, getting ready
-            const auto* voicing = processorRef.voicingLibrary.getVoicing (currentChallenge.voicingId);
-            if (voicing != nullptr)
+            // Beats 2-3: show first chord root (prep) — white, getting ready
             {
                 juce::String keyName = ChordDetector::noteNameFromPitchClass (currentChallenge.keyIndex);
-                juce::String chordText = keyName + ChordDetector::qualitySuffix (voicing->quality);
-                targetLabel.setText ("Next: " + chordText, juce::dontSendNotification);
+                targetLabel.setText ("Next: " + keyName, juce::dontSendNotification);
                 targetLabel.setColour (juce::Label::textColourId, juce::Colours::white);
 
-                // Show on main display too
-                currentRootText = "Next: " + chordText;
+                // Show on main display as "up next"
+                currentRootText = keyName;
                 currentRootColour = juce::Colours::white;
+                nextRootText = "";
             }
 
             // Show target notes on keyboard during prep
@@ -531,19 +531,21 @@ void PracticePanel::enterPlayPhase()
     playPhaseScored = false;
     hasWrongAttempt = false;
 
-    // Show full chord name in urgent color
-    const auto* voicing = processorRef.voicingLibrary.getVoicing (currentChallenge.voicingId);
-    if (voicing != nullptr)
-    {
-        juce::String keyName = ChordDetector::noteNameFromPitchClass (currentChallenge.keyIndex);
-        juce::String chordText = keyName + ChordDetector::qualitySuffix (voicing->quality);
-        targetLabel.setText (chordText, juce::dontSendNotification);
-
-        // Show on main display in bright green
-        currentRootText = chordText;
-        currentRootColour = juce::Colour (0xFF00FF66);
-    }
+    // Show root in urgent color
+    juce::String keyName = ChordDetector::noteNameFromPitchClass (currentChallenge.keyIndex);
+    targetLabel.setText (keyName, juce::dontSendNotification);
     targetLabel.setColour (juce::Label::textColourId, juce::Colour (0xFF00FF66));
+
+    currentRootText = keyName;
+    currentRootColour = juce::Colour (0xFF00FF66);
+
+    // Pre-fetch next challenge so we can show "Up next..." immediately
+    if (customMode)
+        nextChallenge = getNextCustomChallenge();
+    else
+        nextChallenge = processorRef.spacedRepetition.getNextChallenge (practicingVoicingId);
+
+    nextRootText = ChordDetector::noteNameFromPitchClass (nextChallenge.keyIndex);
 
     feedbackLabel.setText ("GO!", juce::dontSendNotification);
     feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (0xFF00FF66));
@@ -573,12 +575,7 @@ void PracticePanel::enterPrepPhase()
         updateStats();
     }
 
-    // Fetch next challenge
-    if (customMode)
-        nextChallenge = getNextCustomChallenge();
-    else
-        nextChallenge = processorRef.spacedRepetition.getNextChallenge (practicingVoicingId);
-
+    // Use the next challenge that was pre-fetched in enterPlayPhase()
     const auto* voicing = processorRef.voicingLibrary.getVoicing (nextChallenge.voicingId);
     if (voicing == nullptr)
     {
@@ -590,14 +587,15 @@ void PracticePanel::enterPrepPhase()
     currentChallenge = nextChallenge;
     targetNotes = VoicingLibrary::transposeToKey (*voicing, currentChallenge.rootMidiNote);
 
-    // Show just the ROOT of the next chord (prep) — dimmer color
+    // Show upcoming root dimmed as the main display (prep = getting ready)
     juce::String keyName = ChordDetector::noteNameFromPitchClass (currentChallenge.keyIndex);
-    targetLabel.setText ("Next: " + keyName, juce::dontSendNotification);
+    targetLabel.setText ("Up next: " + keyName, juce::dontSendNotification);
     targetLabel.setColour (juce::Label::textColourId, juce::Colour (0xFF889999));
 
-    // Show on main display — dim
-    currentRootText = "Next: " + keyName;
+    // Main display: upcoming root dimmed, no "up next" subtitle (it IS the main one now)
+    currentRootText = keyName;
     currentRootColour = juce::Colour (0xFF889999);
+    nextRootText = "";
 
     // Clear keyboard
     keyboardRef.clearAllColours();
@@ -642,13 +640,13 @@ void PracticePanel::loadNextChallenge()
     else
     {
         juce::String keyName = ChordDetector::noteNameFromPitchClass (currentChallenge.keyIndex);
-        juce::String chordText = keyName + ChordDetector::qualitySuffix (voicing->quality);
-        targetLabel.setText ("Play: " + chordText, juce::dontSendNotification);
+        targetLabel.setText ("Play: " + keyName, juce::dontSendNotification);
         targetLabel.setColour (juce::Label::textColourId, juce::Colours::white);
         feedbackLabel.setText ("", juce::dontSendNotification);
 
         // Show root in grey on main display
-        currentRootText = chordText;
+        currentRootText = keyName;
+        nextRootText = "";
         currentRootColour = juce::Colour (0xFF889999);
 
         keyboardRef.clearAllColours();

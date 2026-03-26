@@ -31,6 +31,7 @@ private:
 
   // Chord display
   juce::Label chordDisplayLabel;
+  juce::Label nextRootLabel;
 
   // Keyboard
   ChordyKeyboardComponent keyboard;
