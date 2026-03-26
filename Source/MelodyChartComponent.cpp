@@ -502,17 +502,13 @@ void MelodyChartComponent::paint (juce::Graphics& g)
         NoteState state = (stateIt != noteStates.end()) ? stateIt->second : NoteState::Default;
 
         juce::uint32 noteColour;
+        bool isTarget = (i == highlightedNoteIndex && (state == NoteState::Default || state == NoteState::Target));
         switch (state)
         {
-            case NoteState::Target:  noteColour = ChordyTheme::melodyNoteActive; break;
             case NoteState::Correct: noteColour = ChordyTheme::melodyNoteCorrect; break;
             case NoteState::Missed:  noteColour = ChordyTheme::melodyNoteMissed; break;
             default:                 noteColour = ChordyTheme::melodyNoteBg; break;
         }
-
-        // Highlighted note gets target colour if no explicit state
-        if (i == highlightedNoteIndex && state == NoteState::Default)
-            noteColour = ChordyTheme::melodyNoteActive;
 
         for (int row = startRow; row <= endRow; ++row)
         {
@@ -522,13 +518,20 @@ void MelodyChartComponent::paint (juce::Graphics& g)
             g.setColour (juce::Colour (noteColour));
             g.fillRoundedRectangle (rect, 3.0f);
 
+            // Draw amber outline for the current target note
+            if (isTarget)
+            {
+                g.setColour (juce::Colour (ChordyTheme::accent));
+                g.drawRoundedRectangle (rect, 3.0f, 2.0f);
+            }
+
             // Note name inside rect
             int pitchClass = ((mel->keyPitchClass + note.intervalFromKeyRoot) % 12 + 12) % 12;
             juce::String noteName = ChordDetector::noteNameFromPitchClass (pitchClass);
 
-            g.setColour (state == NoteState::Default && i != highlightedNoteIndex
-                         ? juce::Colour (ChordyTheme::textPrimary)
-                         : juce::Colour (ChordyTheme::bgDeepest));
+            g.setColour (state == NoteState::Correct || state == NoteState::Missed
+                         ? juce::Colour (ChordyTheme::bgDeepest)
+                         : juce::Colour (ChordyTheme::textPrimary));
             g.setFont (11.0f);
             g.drawText (noteName, rect, juce::Justification::centred, false);
         }

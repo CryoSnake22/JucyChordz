@@ -1645,33 +1645,9 @@ void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
 
     previousFramePitchClasses = currentPCs;
 
-    // Step 3: No new notes — update keyboard colours and return
+    // Step 3: No new notes — leave keyboard as-is and return
     if (newNoteOns.empty())
-    {
-        if (! activeNotes.empty())
-        {
-            // Colour held notes
-            const auto& target = transposedMelody.notes[static_cast<size_t> (melodyNoteIndex)];
-            int targetPC = (melodyKeyRootMidi + target.intervalFromKeyRoot) % 12;
-            if (targetPC < 0) targetPC += 12;
-            int targetMidi = melodyKeyRootMidi + target.intervalFromKeyRoot;
-
-            keyboardRef.clearAllColours();
-            if (targetMidi >= 0 && targetMidi < 128)
-                keyboardRef.setKeyColour (targetMidi, KeyColour::Target);
-            for (int n : activeNotes)
-            {
-                int pc = n % 12;
-                if (pc < 0) pc += 12;
-                if (pc == targetPC)
-                    keyboardRef.setKeyColour (n, KeyColour::Correct);
-                else
-                    keyboardRef.setKeyColour (n, KeyColour::Wrong);
-            }
-            keyboardRef.repaint();
-        }
         return;
-    }
 
     // Step 4: Check new notes against target
     const auto& target = transposedMelody.notes[static_cast<size_t> (melodyNoteIndex)];
@@ -1696,42 +1672,44 @@ void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
             melodyNotesCorrect++;
 
         practiceMLChart.setNoteState (melodyNoteIndex, MelodyChartComponent::NoteState::Correct);
+
+        // Color keyboard same as voicing/progression: green for correct, red for wrong
+        keyboardRef.clearAllColours();
+        for (int n : activeNotes)
+        {
+            int pc = n % 12;
+            if (pc < 0) pc += 12;
+            if (pc == targetPC)
+                keyboardRef.setKeyColour (n, KeyColour::Correct);
+            else
+                keyboardRef.setKeyColour (n, KeyColour::Wrong);
+        }
+        keyboardRef.repaint();
+
         melodyNoteIndex++;
 
         feedbackLabel.setText ("Correct!", juce::dontSendNotification);
         feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
 
-        if (melodyNoteIndex >= static_cast<int> (transposedMelody.notes.size()))
-        {
-            advanceMelodyNote(); // triggers key completion
-        }
-        else
-        {
-            advanceMelodyNote(); // shows next note target
-        }
-    }
-    else if (gotWrong && ! gotCorrect)
-    {
-        feedbackLabel.setText ("Wrong note!", juce::dontSendNotification);
-        feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::danger));
+        advanceMelodyNote(); // shows next note target or triggers key completion
+        return;
     }
 
-    // Update keyboard colours
+    // Wrong note — don't advance, color keyboard same as other modes
+    feedbackLabel.setText ("Wrong note!", juce::dontSendNotification);
+    feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::danger));
+
+    int targetMidi = melodyKeyRootMidi + target.intervalFromKeyRoot;
     keyboardRef.clearAllColours();
-    if (melodyNoteIndex < static_cast<int> (transposedMelody.notes.size()))
-    {
-        const auto& nextNote = transposedMelody.notes[static_cast<size_t> (melodyNoteIndex)];
-        int nextMidi = melodyKeyRootMidi + nextNote.intervalFromKeyRoot;
-        if (nextMidi >= 0 && nextMidi < 128)
-            keyboardRef.setKeyColour (nextMidi, KeyColour::Target);
-    }
+    if (targetMidi >= 0 && targetMidi < 128)
+        keyboardRef.setKeyColour (targetMidi, KeyColour::Target);
     for (int n : activeNotes)
     {
         int pc = n % 12;
         if (pc < 0) pc += 12;
-        if (pc == targetPC && gotCorrect)
+        if (pc == targetPC)
             keyboardRef.setKeyColour (n, KeyColour::Correct);
-        else if (pc != targetPC)
+        else
             keyboardRef.setKeyColour (n, KeyColour::Wrong);
     }
     keyboardRef.repaint();
