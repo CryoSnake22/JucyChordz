@@ -27,6 +27,11 @@ void ProgressionRecorder::stopRecording()
     rawMidi.updateMatchedPairs();
 }
 
+void ProgressionRecorder::injectEvent (const juce::MidiMessage& msg)
+{
+    rawMidi.addEvent (msg);
+}
+
 void ProgressionRecorder::processBlock (const juce::MidiBuffer& midi, int numSamples)
 {
     if (! recording)

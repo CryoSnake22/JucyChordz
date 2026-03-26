@@ -85,6 +85,11 @@ private:
     Progression pendingProgression;
     double currentQuantizeResolution = 1.0;
 
+    // Chord preview playback (timer-based note-off)
+    std::vector<int> chordPreviewNotes;
+    int chordPreviewFrames = 0;
+    static constexpr int chordPreviewHoldFrames = 30; // ~0.5s at 60Hz
+
     void enterIdle();
     void enterCountIn();
     void enterRecording();

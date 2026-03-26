@@ -32,6 +32,9 @@ public:
         double resolution,
         double totalBeats);
 
+    // Inject a MIDI event directly (e.g. for pre-held notes at beat 0)
+    void injectEvent (const juce::MidiMessage& msg);
+
     // Get the total duration of the recording in beats
     double getTotalBeats() const { return totalRecordedBeats; }
 

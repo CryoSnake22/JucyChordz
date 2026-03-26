@@ -88,6 +88,17 @@ ProgressionLibraryPanel::ProgressionLibraryPanel (AudioPluginAudioProcessor& pro
     progressionList.setOutlineThickness (1);
     addAndMakeVisible (progressionList);
 
+    chartPreview.onChordSelected = [this](int idx) {
+        auto id = getSelectedProgressionId();
+        const auto* prog = processorRef.progressionLibrary.getProgression (id);
+        if (prog != nullptr && idx >= 0 && idx < static_cast<int> (prog->chords.size()))
+        {
+            const auto& chord = prog->chords[static_cast<size_t> (idx)];
+            playChordPreview (chord);
+            if (onChordPreview)
+                onChordPreview (chord.midiNotes);
+        }
+    };
     addAndMakeVisible (chartPreview);
 
     recordButton.onClick = [this] {
@@ -471,7 +482,17 @@ void ProgressionLibraryPanel::enterRecording()
     panelState = PanelState::Recording;
 
     double bpm = *processorRef.apvts.getRawParameterValue ("bpm");
+    int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
     processorRef.progressionRecorder.startRecording (bpm, processorRef.getSampleRate());
+
+    // Inject any currently held notes as note-ons at beat 0
+    auto heldNotes = processorRef.getActiveNotes();
+    for (int note : heldNotes)
+    {
+        auto msg = juce::MidiMessage::noteOn (ch, note, (juce::uint8) 100);
+        msg.setTimeStamp (0.0);
+        processorRef.progressionRecorder.injectEvent (msg);
+    }
 
     recordButton.setButtonText ("Stop");
     recordingIndicator.setText ("REC - Recording...", juce::dontSendNotification);
@@ -561,6 +582,18 @@ void ProgressionLibraryPanel::updateTimerCallback()
         }
     }
 
+    // --- Chord preview note-off ---
+    if (chordPreviewFrames > 0)
+    {
+        if (--chordPreviewFrames == 0 && ! chordPreviewNotes.empty())
+        {
+            int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
+            for (int note : chordPreviewNotes)
+                processorRef.addPreviewMidi (juce::MidiMessage::noteOff (ch, note, 0.0f));
+            chordPreviewNotes.clear();
+        }
+    }
+
     // --- Playback cursor ---
     if (processorRef.isPlayingProgression())
     {
@@ -627,16 +660,14 @@ void ProgressionLibraryPanel::applyQuantize (double resolution)
     processorRef.stopProgressionPlayback();
     currentQuantizeResolution = resolution;
 
-    auto chords = ProgressionRecorder::analyzeChordChanges (
-        pendingProgression.rawMidi, &processorRef.voicingLibrary);
-
+    // Re-quantize the current edited chords (preserves name/root/quality edits)
     pendingProgression.chords = ProgressionRecorder::quantize (
-        chords, resolution, processorRef.progressionRecorder.getTotalBeats());
+        pendingProgression.chords, resolution, pendingProgression.totalBeats);
 
     double maxEnd = 0.0;
     for (const auto& c : pendingProgression.chords)
         maxEnd = juce::jmax (maxEnd, c.startBeat + c.durationBeats);
-    pendingProgression.totalBeats = maxEnd;
+    pendingProgression.totalBeats = juce::jmax (pendingProgression.totalBeats, maxEnd);
 
     quantBeatBtn.setToggleState (resolution == 1.0, juce::dontSendNotification);
     quantHalfBtn.setToggleState (resolution == 0.5, juce::dontSendNotification);
@@ -671,20 +702,21 @@ void ProgressionLibraryPanel::onEditChordSelected (int index)
 
 void ProgressionLibraryPanel::playChordPreview (const ProgressionChord& chord)
 {
-    int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
+    // Release any previously previewing notes
+    if (! chordPreviewNotes.empty())
+    {
+        int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
+        for (int note : chordPreviewNotes)
+            processorRef.addPreviewMidi (juce::MidiMessage::noteOff (ch, note, 0.0f));
+        chordPreviewNotes.clear();
+    }
 
+    int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
     for (int note : chord.midiNotes)
         processorRef.addPreviewMidi (juce::MidiMessage::noteOn (ch, note, 0.7f));
 
-    // Schedule note-offs after a short hold (via a delayed call is complex,
-    // so we'll send note-offs with a slight future offset — the preview buffer
-    // merges at sample 0 anyway, so let's use the timer approach from the editor)
-    // For simplicity, send immediate note-offs after a short delay is not trivial
-    // without a timer here. Instead, send note-offs after 500ms worth of samples.
-    // Actually, the simplest: just let them ring and the synth's decay handles it.
-    // Send note-offs immediately — the piano synth has no sustain, so it'll decay naturally.
-    for (int note : chord.midiNotes)
-        processorRef.addPreviewMidi (juce::MidiMessage::noteOff (ch, note, 0.0f));
+    chordPreviewNotes = chord.midiNotes;
+    chordPreviewFrames = chordPreviewHoldFrames;
 }
 
 void ProgressionLibraryPanel::onEditDeleteChord()

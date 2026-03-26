@@ -144,6 +144,23 @@ ProgressionChartComponent::DragEdge ProgressionChartComponent::hitTestEdge (
         }
     }
 
+    // Check end marker
+    if (prog != nullptr)
+    {
+        double totalBeats = prog->totalBeats;
+        int endRow = getRowForBeat (totalBeats);
+        double rowStartBeat = endRow * beatsPerRow;
+        float endX = leftPad + static_cast<float> (totalBeats - rowStartBeat) * getBeatWidth();
+        float endY = static_cast<float> (endRow * (rowHeight + rowGap));
+
+        if (std::abs (pos.x - endX) < edgeHitZone + 2.0f
+            && pos.y >= endY && pos.y <= endY + rowHeight)
+        {
+            outChordIndex = -1;
+            return DragEdge::EndMarker;
+        }
+    }
+
     outChordIndex = -1;
     return DragEdge::None;
 }
@@ -175,6 +192,12 @@ void ProgressionChartComponent::mouseDown (const juce::MouseEvent& e)
     {
         int idx = -1;
         auto edge = hitTestEdge (e.position, idx);
+        if (edge == DragEdge::EndMarker)
+        {
+            dragEdge = DragEdge::EndMarker;
+            dragChordIndex = -1;
+            return;
+        }
         if (edge != DragEdge::None && idx >= 0)
         {
             dragEdge = edge;
@@ -200,7 +223,32 @@ void ProgressionChartComponent::mouseDown (const juce::MouseEvent& e)
 
 void ProgressionChartComponent::mouseDrag (const juce::MouseEvent& e)
 {
-    if (dragEdge == DragEdge::None || dragChordIndex < 0 || progression == nullptr)
+    if (dragEdge == DragEdge::None || progression == nullptr)
+        return;
+
+    // End marker drag — independent of chord durations
+    if (dragEdge == DragEdge::EndMarker)
+    {
+        int row = getRowForBeat (progression->totalBeats);
+        double newEnd = snapBeat (xToBeat (e.position.x, row));
+
+        // Must be at least past the end of the last chord
+        if (! progression->chords.empty())
+        {
+            auto& last = progression->chords.back();
+            double minEnd = last.startBeat + last.durationBeats;
+            if (newEnd < minEnd)
+                newEnd = minEnd;
+        }
+        if (newEnd < quantizeGrid)
+            newEnd = quantizeGrid;
+
+        progression->totalBeats = newEnd;
+        repaint();
+        return;
+    }
+
+    if (dragChordIndex < 0)
         return;
 
     auto& chord = progression->chords[static_cast<size_t> (dragChordIndex)];
@@ -358,6 +406,26 @@ void ProgressionChartComponent::paint (juce::Graphics& g)
             g.drawText (chord.getDisplayName(), inset.reduced (2.0f, 0),
                         juce::Justification::centred, true);
         }
+    }
+
+    // Draw end marker (edit mode only)
+    if (editMode && totalBeats > 0.0)
+    {
+        int endRow = getRowForBeat (totalBeats);
+        double endRowStart = endRow * beatsPerRow;
+        float endX = leftPad + static_cast<float> (totalBeats - endRowStart) * bw;
+        float endY = static_cast<float> (endRow * (rowHeight + rowGap));
+
+        // Thick amber line with a small triangle handle
+        g.setColour (juce::Colour (ChordyTheme::accent));
+        g.fillRect (endX - 1.5f, endY, 3.0f, static_cast<float> (rowHeight));
+
+        // Small triangle at bottom of the line
+        juce::Path triangle;
+        triangle.addTriangle (endX - 5.0f, endY + rowHeight,
+                              endX + 5.0f, endY + rowHeight,
+                              endX, endY + rowHeight - 6.0f);
+        g.fillPath (triangle);
     }
 
     // Draw cursor

@@ -38,7 +38,7 @@ private:
     double quantizeGrid = 1.0;
 
     // Drag state
-    enum class DragEdge { None, Left, Right };
+    enum class DragEdge { None, Left, Right, EndMarker };
     DragEdge dragEdge = DragEdge::None;
     int dragChordIndex = -1;
     double dragOrigStartBeat = 0.0;
