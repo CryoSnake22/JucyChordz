@@ -1612,12 +1612,10 @@ void PracticePanel::advanceMelodyNote()
     targetLabel.setText ("Key: " + keyName + "  —  Play: " + noteName, juce::dontSendNotification);
     feedbackLabel.setText ("", juce::dontSendNotification);
 
-    // Show target on keyboard
+    // Add target on keyboard (don't clear — let Step 3 in updateMelodyPractice handle cleanup)
     int targetMidi = melodyKeyRootMidi + note.intervalFromKeyRoot;
-    keyboardRef.clearAllColours();
     if (targetMidi >= 0 && targetMidi < 128)
         keyboardRef.setKeyColour (targetMidi, KeyColour::Target);
-    keyboardRef.repaint();
 
     // Update backing chord if needed
     updateMelodyBacking();
@@ -1645,9 +1643,31 @@ void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
 
     previousFramePitchClasses = currentPCs;
 
-    // Step 3: No new notes — leave keyboard as-is and return
+    // Clear lastCorrectPC when all notes released
+    if (activeNotes.empty())
+        lastCorrectPC = -1;
+
+    // Step 3: No new notes — refresh keyboard every frame (same as voicing practice)
     if (newNoteOns.empty())
+    {
+        keyboardRef.clearAllColours();
+        if (melodyNoteIndex < static_cast<int> (transposedMelody.notes.size()))
+        {
+            const auto& tgt = transposedMelody.notes[static_cast<size_t> (melodyNoteIndex)];
+            int tgtMidi = melodyKeyRootMidi + tgt.intervalFromKeyRoot;
+            int tgtPC = ((melodyKeyRootMidi + tgt.intervalFromKeyRoot) % 12 + 12) % 12;
+            if (tgtMidi >= 0 && tgtMidi < 128)
+                keyboardRef.setKeyColour (tgtMidi, KeyColour::Target);
+            for (int n : activeNotes)
+            {
+                int pc = ((n % 12) + 12) % 12;
+                if (pc == tgtPC || pc == lastCorrectPC)
+                    keyboardRef.setKeyColour (n, KeyColour::Correct);
+            }
+        }
+        keyboardRef.repaint();
         return;
+    }
 
     // Step 4: Check new notes against target
     const auto& target = transposedMelody.notes[static_cast<size_t> (melodyNoteIndex)];
@@ -1672,20 +1692,7 @@ void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
             melodyNotesCorrect++;
 
         practiceMLChart.setNoteState (melodyNoteIndex, MelodyChartComponent::NoteState::Correct);
-
-        // Color keyboard same as voicing/progression: green for correct, red for wrong
-        keyboardRef.clearAllColours();
-        for (int n : activeNotes)
-        {
-            int pc = n % 12;
-            if (pc < 0) pc += 12;
-            if (pc == targetPC)
-                keyboardRef.setKeyColour (n, KeyColour::Correct);
-            else
-                keyboardRef.setKeyColour (n, KeyColour::Wrong);
-        }
-        keyboardRef.repaint();
-
+        lastCorrectPC = targetPC;
         melodyNoteIndex++;
 
         feedbackLabel.setText ("Correct!", juce::dontSendNotification);
@@ -1695,24 +1702,9 @@ void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
         return;
     }
 
-    // Wrong note — don't advance, color keyboard same as other modes
+    // Wrong note — don't advance (Step 3 handles keyboard coloring next frame)
     feedbackLabel.setText ("Wrong note!", juce::dontSendNotification);
     feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::danger));
-
-    int targetMidi = melodyKeyRootMidi + target.intervalFromKeyRoot;
-    keyboardRef.clearAllColours();
-    if (targetMidi >= 0 && targetMidi < 128)
-        keyboardRef.setKeyColour (targetMidi, KeyColour::Target);
-    for (int n : activeNotes)
-    {
-        int pc = n % 12;
-        if (pc < 0) pc += 12;
-        if (pc == targetPC)
-            keyboardRef.setKeyColour (n, KeyColour::Correct);
-        else
-            keyboardRef.setKeyColour (n, KeyColour::Wrong);
-    }
-    keyboardRef.repaint();
 }
 
 //==============================================================================

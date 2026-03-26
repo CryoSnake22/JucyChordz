@@ -129,6 +129,7 @@ private:
     int melodyKeyOffset = 0;
     int melodyKeyRootMidi = 60;
     std::set<int> previousFramePitchClasses;
+    int lastCorrectPC = -1;  // pitch class of last correctly played note (for green hold)
     MelodyChartComponent practiceMLChart;
     juce::ToggleButton backingToggle { "Backing" };
     std::vector<int> backingChordNotes;
