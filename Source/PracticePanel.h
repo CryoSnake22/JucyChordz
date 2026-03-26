@@ -4,9 +4,13 @@
 #include "VoicingModel.h"
 #include "SpacedRepetition.h"
 #include "ChordDetector.h"
+#include <set>
+#include <random>
 
 class AudioPluginAudioProcessor;
 class ChordyKeyboardComponent;
+
+enum class RootOrder { Chromatic, Random };
 
 class PracticePanel : public juce::Component
 {
@@ -53,8 +57,22 @@ private:
     juce::TextButton startButton { "Start" };
     juce::TextButton nextButton { "Next" };
     juce::TextButton playButton { "Play" };
+    juce::TextButton customButton { "Custom" };
     juce::ToggleButton timedToggle { "Timed" };
     juce::Label timingFeedbackLabel;
+
+    // Key selector UI (visible when showingKeySelector)
+    bool showingKeySelector = false;
+    juce::ToggleButton keyToggles[12];
+    juce::ComboBox orderCombo;
+
+    // Custom practice state
+    bool customMode = false;
+    std::set<int> customAllowedKeys;
+    RootOrder rootOrder = RootOrder::Random;
+    std::vector<int> customKeySequence;
+    int customKeyIndex = 0;
+    std::mt19937 rng { std::random_device{}() };
 
     bool practicing = false;
     juce::String practicingVoicingId;  // which voicing we're practicing
@@ -81,6 +99,9 @@ private:
     void onStartStop();
     void onNext();
     void onPlay();
+    void onCustomToggle();
+    void buildCustomKeySequence();
+    PracticeChallenge getNextCustomChallenge();
     void loadNextChallenge();
     void updateTimedPractice (const std::vector<int>& activeNotes);
     void updateUntimedPractice (const std::vector<int>& activeNotes);

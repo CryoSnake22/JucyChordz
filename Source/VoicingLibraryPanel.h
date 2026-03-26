@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "VoicingModel.h"
+#include "VoicingStatsChart.h"
 
 // Forward declare
 class AudioPluginAudioProcessor;
@@ -43,6 +44,7 @@ private:
     juce::ListBox voicingList;
     juce::TextButton recordButton { "Record" };
     juce::TextButton deleteButton { "Delete" };
+    VoicingStatsChart statsChart;
 
     // --- Confirmation mode components ---
     juce::Label confirmHeader;

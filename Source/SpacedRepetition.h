@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_data_structures/juce_data_structures.h>
+#include <array>
 #include <vector>
 
 struct PracticeRecord
@@ -41,7 +42,22 @@ public:
     // Get the next challenge across all voicings (needs list of voicing IDs)
     PracticeChallenge getNextChallenge (const std::vector<juce::String>& voicingIds) const;
 
-    // Stats
+    // Per-key stats for a voicing
+    struct KeyStats
+    {
+        int successes = 0;
+        int failures = 0;
+        int lastQuality = -1;
+        double accuracy() const
+        {
+            int total = successes + failures;
+            return total > 0 ? static_cast<double> (successes) / total : -1.0;
+        }
+    };
+
+    std::array<KeyStats, 12> getStatsForVoicing (const juce::String& voicingId) const;
+
+    // Global stats
     int getTotalAttempts() const;
     int getTotalSuccesses() const;
     double getAccuracy() const;

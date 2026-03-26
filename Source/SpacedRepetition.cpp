@@ -201,6 +201,22 @@ PracticeChallenge SpacedRepetitionEngine::getNextChallenge (
     return bestChallenge;
 }
 
+std::array<SpacedRepetitionEngine::KeyStats, 12>
+SpacedRepetitionEngine::getStatsForVoicing (const juce::String& voicingId) const
+{
+    std::array<KeyStats, 12> stats {};
+    for (const auto& r : records)
+    {
+        if (r.voicingId == voicingId && r.keyIndex >= 0 && r.keyIndex < 12)
+        {
+            stats[static_cast<size_t> (r.keyIndex)].successes = r.successes;
+            stats[static_cast<size_t> (r.keyIndex)].failures = r.failures;
+            stats[static_cast<size_t> (r.keyIndex)].lastQuality = r.lastResponseQuality;
+        }
+    }
+    return stats;
+}
+
 int SpacedRepetitionEngine::getTotalAttempts() const
 {
     int total = 0;

@@ -22,7 +22,7 @@ juce::Colour ChordyKeyboardComponent::getOverlayColour (KeyColour kc) const
     {
         case KeyColour::Correct:  return juce::Colour (0x8800CC44); // green, semi-transparent
         case KeyColour::Wrong:    return juce::Colour (0x88CC2200); // red, semi-transparent
-        case KeyColour::Target:   return juce::Colour (0x554488CC); // blue, dim
+        case KeyColour::Target:   return juce::Colour (0xAA4488FF); // bright blue, clearly visible
         default:                  return juce::Colour();
     }
 }

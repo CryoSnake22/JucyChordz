@@ -40,9 +40,29 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
     playButton.setEnabled (false);
     addAndMakeVisible (playButton);
 
+    customButton.onClick = [this] { onCustomToggle(); };
+    addAndMakeVisible (customButton);
+
     timedToggle.setColour (juce::ToggleButton::textColourId, juce::Colour (0xFFAABBCC));
     timedToggle.setColour (juce::ToggleButton::tickColourId, juce::Colour (0xFF44CC88));
     addAndMakeVisible (timedToggle);
+
+    // Key selector toggles (hidden by default)
+    static const char* noteNames[] = { "C", "Db", "D", "Eb", "E", "F",
+                                        "Gb", "G", "Ab", "A", "Bb", "B" };
+    for (int i = 0; i < 12; ++i)
+    {
+        keyToggles[i].setButtonText (noteNames[i]);
+        keyToggles[i].setToggleState (true, juce::dontSendNotification);
+        keyToggles[i].setColour (juce::ToggleButton::textColourId, juce::Colour (0xFFAABBCC));
+        keyToggles[i].setColour (juce::ToggleButton::tickColourId, juce::Colour (0xFF44CC88));
+        addChildComponent (keyToggles[i]);
+    }
+
+    orderCombo.addItem ("Random", 1);
+    orderCombo.addItem ("Chromatic", 2);
+    orderCombo.setSelectedId (1, juce::dontSendNotification);
+    addChildComponent (orderCombo);
 
     timingFeedbackLabel.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     timingFeedbackLabel.setColour (juce::Label::textColourId, juce::Colour (0xFF889999));
@@ -69,15 +89,38 @@ void PracticePanel::resized()
     area.removeFromTop (4);
 
     auto buttonRow = area.removeFromTop (30);
-    int buttonWidth = (buttonRow.getWidth() - 8) / 3;
+    int buttonWidth = (buttonRow.getWidth() - 12) / 4;
     startButton.setBounds (buttonRow.removeFromLeft (buttonWidth));
     buttonRow.removeFromLeft (4);
     nextButton.setBounds (buttonRow.removeFromLeft (buttonWidth));
     buttonRow.removeFromLeft (4);
-    playButton.setBounds (buttonRow);
+    playButton.setBounds (buttonRow.removeFromLeft (buttonWidth));
+    buttonRow.removeFromLeft (4);
+    customButton.setBounds (buttonRow);
 
     area.removeFromTop (4);
     timedToggle.setBounds (area.removeFromTop (24));
+
+    // Key selector (conditionally visible)
+    if (showingKeySelector)
+    {
+        area.removeFromTop (4);
+        // Row 1: C through F (6 keys)
+        auto keyRow1 = area.removeFromTop (22);
+        int kw = keyRow1.getWidth() / 6;
+        for (int i = 0; i < 6; ++i)
+            keyToggles[i].setBounds (keyRow1.removeFromLeft (kw));
+
+        area.removeFromTop (2);
+        // Row 2: Gb through B (6 keys)
+        auto keyRow2 = area.removeFromTop (22);
+        for (int i = 6; i < 12; ++i)
+            keyToggles[i].setBounds (keyRow2.removeFromLeft (kw));
+
+        area.removeFromTop (2);
+        // Order combo
+        orderCombo.setBounds (area.removeFromTop (24));
+    }
 
     area.removeFromTop (8);
     feedbackLabel.setBounds (area.removeFromTop (24));
@@ -130,7 +173,15 @@ void PracticePanel::startPractice (const juce::String& voicingId)
     playButton.setEnabled (true);
 
     // Get first challenge
-    currentChallenge = processorRef.spacedRepetition.getNextChallenge (voicingId);
+    if (customMode)
+    {
+        buildCustomKeySequence();
+        currentChallenge = getNextCustomChallenge();
+    }
+    else
+    {
+        currentChallenge = processorRef.spacedRepetition.getNextChallenge (voicingId);
+    }
 
     const auto* voicing = processorRef.voicingLibrary.getVoicing (voicingId);
     if (voicing == nullptr)
@@ -455,7 +506,10 @@ void PracticePanel::enterPrepPhase()
     }
 
     // Fetch next challenge
-    nextChallenge = processorRef.spacedRepetition.getNextChallenge (practicingVoicingId);
+    if (customMode)
+        nextChallenge = getNextCustomChallenge();
+    else
+        nextChallenge = processorRef.spacedRepetition.getNextChallenge (practicingVoicingId);
 
     const auto* voicing = processorRef.voicingLibrary.getVoicing (nextChallenge.voicingId);
     if (voicing == nullptr)
@@ -571,6 +625,73 @@ void PracticePanel::onNext()
         }
         loadNextChallenge();
     }
+}
+
+void PracticePanel::onCustomToggle()
+{
+    if (practicing)
+        return;
+
+    showingKeySelector = ! showingKeySelector;
+
+    for (int i = 0; i < 12; ++i)
+        keyToggles[i].setVisible (showingKeySelector);
+    orderCombo.setVisible (showingKeySelector);
+
+    customMode = showingKeySelector;
+    customButton.setColour (juce::TextButton::buttonColourId,
+        showingKeySelector ? juce::Colour (0xFF446688)
+                           : getLookAndFeel().findColour (juce::TextButton::buttonColourId));
+
+    resized();
+    repaint();
+}
+
+void PracticePanel::buildCustomKeySequence()
+{
+    customAllowedKeys.clear();
+    for (int i = 0; i < 12; ++i)
+        if (keyToggles[i].getToggleState())
+            customAllowedKeys.insert (i);
+
+    if (customAllowedKeys.empty())
+    {
+        // Nothing selected — use all
+        for (int i = 0; i < 12; ++i)
+            customAllowedKeys.insert (i);
+    }
+
+    rootOrder = (orderCombo.getSelectedId() == 2) ? RootOrder::Chromatic : RootOrder::Random;
+
+    customKeySequence.clear();
+    customKeySequence.assign (customAllowedKeys.begin(), customAllowedKeys.end());
+
+    if (rootOrder == RootOrder::Random)
+        std::shuffle (customKeySequence.begin(), customKeySequence.end(), rng);
+
+    customKeyIndex = 0;
+}
+
+PracticeChallenge PracticePanel::getNextCustomChallenge()
+{
+    if (customKeySequence.empty())
+        buildCustomKeySequence();
+
+    if (customKeyIndex >= static_cast<int> (customKeySequence.size()))
+    {
+        // Cycle: rebuild for next round
+        if (rootOrder == RootOrder::Random)
+            std::shuffle (customKeySequence.begin(), customKeySequence.end(), rng);
+        customKeyIndex = 0;
+    }
+
+    int key = customKeySequence[static_cast<size_t> (customKeyIndex++)];
+
+    PracticeChallenge challenge;
+    challenge.voicingId = practicingVoicingId;
+    challenge.keyIndex = key;
+    challenge.rootMidiNote = 48 + key;
+    return challenge;
 }
 
 void PracticePanel::onPlay()

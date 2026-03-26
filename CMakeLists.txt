@@ -24,7 +24,8 @@ set(SOURCE_FILES Source/BeatIndicatorComponent.cpp Source/BeatIndicatorComponent
                  Source/SpacedRepetition.cpp Source/SpacedRepetition.h
                  Source/TempoEngine.cpp Source/TempoEngine.h
                  Source/VoicingLibraryPanel.cpp Source/VoicingLibraryPanel.h
-                 Source/VoicingModel.cpp Source/VoicingModel.h)
+                 Source/VoicingModel.cpp Source/VoicingModel.h
+                 Source/VoicingStatsChart.cpp Source/VoicingStatsChart.h)
 
 # Change these to your own preferences
 juce_add_plugin(

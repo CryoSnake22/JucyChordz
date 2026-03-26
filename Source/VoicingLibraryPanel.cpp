@@ -100,6 +100,8 @@ VoicingLibraryPanel::VoicingLibraryPanel (AudioPluginAudioProcessor& processor)
     voicingList.setOutlineThickness (1);
     addAndMakeVisible (voicingList);
 
+    addAndMakeVisible (statsChart);
+
     recordButton.onClick = [this] { onRecordToggle(); };
     addAndMakeVisible (recordButton);
 
@@ -222,6 +224,11 @@ void VoicingLibraryPanel::layoutNormalMode (juce::Rectangle<int> area)
     bottomRow.removeFromRight (4);
     recordButton.setBounds (bottomRow.removeFromRight (70));
     area.removeFromBottom (4);
+
+    // Stats chart between list and buttons
+    auto chartArea = area.removeFromBottom (80);
+    area.removeFromBottom (4);
+    statsChart.setBounds (chartArea);
 
     voicingList.setBounds (area);
 }
@@ -511,6 +518,13 @@ void VoicingLibraryPanel::paintListBoxItem (int rowNumber, juce::Graphics& g,
 
 void VoicingLibraryPanel::selectedRowsChanged (int /*lastRowClicked*/)
 {
+    auto selectedId = getSelectedVoicingId();
+
+    if (selectedId.isNotEmpty())
+        statsChart.setStats (processorRef.spacedRepetition.getStatsForVoicing (selectedId));
+    else
+        statsChart.clearStats();
+
     if (onSelectionChanged)
-        onSelectionChanged (getSelectedVoicingId());
+        onSelectionChanged (selectedId);
 }
