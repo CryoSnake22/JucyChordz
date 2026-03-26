@@ -163,6 +163,8 @@ void PracticePanel::startPractice (const juce::String& voicingId)
         targetLabel.setText ("Get ready...", juce::dontSendNotification);
         feedbackLabel.setText ("", juce::dontSendNotification);
         timingFeedbackLabel.setText ("", juce::dontSendNotification);
+        practiceDisplayText = "";
+        practiceDisplayColour = juce::Colours::white;
 
         keyboardRef.clearAllColours();
         keyboardRef.repaint();
@@ -195,7 +197,10 @@ void PracticePanel::stopPractice()
 
     headerLabel.setText ("PRACTICE", juce::dontSendNotification);
     targetLabel.setText ("Select a voicing and press Start", juce::dontSendNotification);
+    targetLabel.setColour (juce::Label::textColourId, juce::Colours::white);
     feedbackLabel.setText ("", juce::dontSendNotification);
+    practiceDisplayText = {};
+    practiceDisplayColour = juce::Colours::white;
     timingFeedbackLabel.setText ("", juce::dontSendNotification);
 
     startButton.setButtonText ("Start");
@@ -294,13 +299,18 @@ void PracticePanel::updateTimedPractice (const std::vector<int>& activeNotes)
         }
         else
         {
-            // Beats 2-3: show first chord name (prep)
+            // Beats 2-3: show first chord name (prep) — white, getting ready
             const auto* voicing = processorRef.voicingLibrary.getVoicing (currentChallenge.voicingId);
             if (voicing != nullptr)
             {
                 juce::String keyName = ChordDetector::noteNameFromPitchClass (currentChallenge.keyIndex);
-                targetLabel.setText ("Play: " + keyName + ChordDetector::qualitySuffix (voicing->quality),
-                                     juce::dontSendNotification);
+                juce::String chordText = keyName + ChordDetector::qualitySuffix (voicing->quality);
+                targetLabel.setText ("Next: " + chordText, juce::dontSendNotification);
+                targetLabel.setColour (juce::Label::textColourId, juce::Colours::white);
+
+                // Show on main display too
+                practiceDisplayText = "Next: " + chordText;
+                practiceDisplayColour = juce::Colours::white;
             }
 
             // Show target notes on keyboard during prep
@@ -402,16 +412,22 @@ void PracticePanel::enterPlayPhase()
     playPhaseScored = false;
     hasWrongAttempt = false;
 
-    // Show full chord name
+    // Show full chord name in urgent color
     const auto* voicing = processorRef.voicingLibrary.getVoicing (currentChallenge.voicingId);
     if (voicing != nullptr)
     {
         juce::String keyName = ChordDetector::noteNameFromPitchClass (currentChallenge.keyIndex);
-        targetLabel.setText ("Play: " + keyName + ChordDetector::qualitySuffix (voicing->quality),
-                             juce::dontSendNotification);
-    }
+        juce::String chordText = keyName + ChordDetector::qualitySuffix (voicing->quality);
+        targetLabel.setText (chordText, juce::dontSendNotification);
 
-    feedbackLabel.setText ("", juce::dontSendNotification);
+        // Show on main display in bright green
+        practiceDisplayText = chordText;
+        practiceDisplayColour = juce::Colour (0xFF00FF66);
+    }
+    targetLabel.setColour (juce::Label::textColourId, juce::Colour (0xFF00FF66));
+
+    feedbackLabel.setText ("GO!", juce::dontSendNotification);
+    feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (0xFF00FF66));
     timingFeedbackLabel.setText ("", juce::dontSendNotification);
 
     // Show target notes
@@ -452,9 +468,14 @@ void PracticePanel::enterPrepPhase()
     currentChallenge = nextChallenge;
     targetNotes = VoicingLibrary::transposeToKey (*voicing, currentChallenge.rootMidiNote);
 
-    // Show just the ROOT of the next chord (prep)
+    // Show just the ROOT of the next chord (prep) — dimmer color
     juce::String keyName = ChordDetector::noteNameFromPitchClass (currentChallenge.keyIndex);
     targetLabel.setText ("Next: " + keyName, juce::dontSendNotification);
+    targetLabel.setColour (juce::Label::textColourId, juce::Colour (0xFF889999));
+
+    // Show on main display — dim
+    practiceDisplayText = "Next: " + keyName;
+    practiceDisplayColour = juce::Colour (0xFF889999);
 
     // Clear keyboard
     keyboardRef.clearAllColours();

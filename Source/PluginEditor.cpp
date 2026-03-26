@@ -137,22 +137,34 @@ void AudioPluginAudioProcessorEditor::resized() {
 void AudioPluginAudioProcessorEditor::timerCallback() {
   auto notes = processorRef.getActiveNotes();
 
-  // Update chord display — use last-played notes when keys are released
-  auto displayNotes = notes.empty() ? processorRef.getLastPlayedNotes() : notes;
-
-  if (displayNotes.empty()) {
-    chordDisplayLabel.setText("Play something...", juce::dontSendNotification);
-  } else {
-    // Check user's voicing library first for a custom name match
-    juce::String customName;
-    if (processorRef.voicingLibrary.findByNotes(displayNotes, customName) != nullptr) {
-      chordDisplayLabel.setText(customName, juce::dontSendNotification);
+  // During timed practice, override chord display with practice target
+  if (practicePanel.isTimedActive()) {
+    auto text = practicePanel.getPracticeDisplayText();
+    if (text.isNotEmpty()) {
+      chordDisplayLabel.setText(text, juce::dontSendNotification);
+      chordDisplayLabel.setColour(juce::Label::textColourId,
+                                   practicePanel.getPracticeDisplayColour());
     } else {
-      auto result = ChordDetector::detect(displayNotes);
-      if (result.isValid())
-        chordDisplayLabel.setText(result.displayName, juce::dontSendNotification);
-      else
-        chordDisplayLabel.setText("...", juce::dontSendNotification);
+      chordDisplayLabel.setText("", juce::dontSendNotification);
+    }
+  } else {
+    // Normal chord display — use last-played notes when keys are released
+    chordDisplayLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    auto displayNotes = notes.empty() ? processorRef.getLastPlayedNotes() : notes;
+
+    if (displayNotes.empty()) {
+      chordDisplayLabel.setText("Play something...", juce::dontSendNotification);
+    } else {
+      juce::String customName;
+      if (processorRef.voicingLibrary.findByNotes(displayNotes, customName) != nullptr) {
+        chordDisplayLabel.setText(customName, juce::dontSendNotification);
+      } else {
+        auto result = ChordDetector::detect(displayNotes);
+        if (result.isValid())
+          chordDisplayLabel.setText(result.displayName, juce::dontSendNotification);
+        else
+          chordDisplayLabel.setText("...", juce::dontSendNotification);
+      }
     }
   }
 

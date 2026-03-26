@@ -27,12 +27,22 @@ public:
     void stopPractice();
 
     bool isPracticing() const { return practicing; }
+    bool isTimedActive() const { return timedPhase != TimedPhase::Inactive; }
+
+    // Get current practice display for the main chord label above the keyboard
+    // Returns empty string when practice shouldn't override the chord display
+    juce::String getPracticeDisplayText() const { return practiceDisplayText; }
+    juce::Colour getPracticeDisplayColour() const { return practiceDisplayColour; }
 
     // Called by editor when user selects a voicing in the library
     void setSelectedVoicingId (const juce::String& id) { selectedVoicingId = id; }
 
 private:
     juce::String selectedVoicingId;  // tracks library panel selection
+
+    // Main chord display override (set during timed practice)
+    juce::String practiceDisplayText;
+    juce::Colour practiceDisplayColour { juce::Colours::white };
     AudioPluginAudioProcessor& processorRef;
     ChordyKeyboardComponent& keyboardRef;
 
