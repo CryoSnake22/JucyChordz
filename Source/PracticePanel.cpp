@@ -80,6 +80,9 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
     timingFeedbackLabel.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (timingFeedbackLabel);
 
+    practiceChart.setVisible (false);
+    addAndMakeVisible (practiceChart);
+
     updateStats();
 }
 
@@ -94,9 +97,20 @@ void PracticePanel::resized()
     auto area = getLocalBounds().reduced (ChordyTheme::panelPadding);
 
     headerLabel.setBounds (area.removeFromTop (24));
-    area.removeFromTop (8);
+    area.removeFromTop (4);
 
-    targetLabel.setBounds (area.removeFromTop (36));
+    // Show chart for progression practice, target label for voicing practice
+    if (practicing && practiceType == PracticeType::Progression)
+    {
+        practiceChart.setBounds (area.removeFromTop (70));
+        area.removeFromTop (4);
+        targetLabel.setBounds (area.removeFromTop (24));
+    }
+    else
+    {
+        practiceChart.setBounds (0, 0, 0, 0); // hidden
+        targetLabel.setBounds (area.removeFromTop (36));
+    }
     area.removeFromTop (4);
 
     auto buttonRow = area.removeFromTop (30);
@@ -156,7 +170,35 @@ void PracticePanel::onStartStop()
         return;
     }
 
-    // Start: use currently selected voicing, or first available
+    // Check if we should practice a progression or a voicing
+    if (practiceType == PracticeType::Progression && selectedProgressionId.isNotEmpty())
+    {
+        const auto* prog = processorRef.progressionLibrary.getProgression (selectedProgressionId);
+        if (prog == nullptr || prog->chords.empty())
+        {
+            targetLabel.setText ("Select a valid progression!", juce::dontSendNotification);
+            return;
+        }
+
+        // Block start if custom mode with no keys selected
+        if (customMode)
+        {
+            bool anySelected = false;
+            for (int i = 0; i < 12; ++i)
+                if (keyToggles[i].getToggleState())
+                    anySelected = true;
+            if (! anySelected)
+            {
+                targetLabel.setText ("Select at least one key!", juce::dontSendNotification);
+                return;
+            }
+        }
+
+        startProgressionPractice (selectedProgressionId);
+        return;
+    }
+
+    // Voicing practice
     auto& lib = processorRef.voicingLibrary;
     if (lib.size() == 0)
     {
@@ -282,9 +324,13 @@ void PracticePanel::stopPractice()
     timedPhase = TimedPhase::Inactive;
     targetNotes.clear();
     practicingVoicingId = {};
+    practicingProgressionId = {};
+    progressionChordIndex = 0;
+    practiceChart.setVisible (false);
+    practiceChart.setProgressionReadOnly (nullptr);
 
     headerLabel.setText ("PRACTICE", juce::dontSendNotification);
-    targetLabel.setText ("Select a voicing and press Start", juce::dontSendNotification);
+    targetLabel.setText ("Select a voicing or progression", juce::dontSendNotification);
     targetLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::textPrimary));
     feedbackLabel.setText ("", juce::dontSendNotification);
     currentRootText = {};
@@ -314,6 +360,12 @@ void PracticePanel::updatePractice (const std::vector<int>& activeNotes)
 {
     if (! practicing || targetNotes.empty())
         return;
+
+    if (practiceType == PracticeType::Progression)
+    {
+        updateProgressionPractice (activeNotes);
+        return;
+    }
 
     if (timedPhase != TimedPhase::Inactive)
         updateTimedPractice (activeNotes);
@@ -821,4 +873,183 @@ void PracticePanel::onPlay()
         for (int note : targetNotes)
             processorRef.keyboardState.noteOff (channel, note, 0.0f);
     });
+}
+
+//==============================================================================
+// Progression practice
+//==============================================================================
+
+void PracticePanel::startProgressionPractice (const juce::String& progressionId)
+{
+    const auto* prog = processorRef.progressionLibrary.getProgression (progressionId);
+    if (prog == nullptr || prog->chords.empty())
+    {
+        targetLabel.setText ("Invalid progression!", juce::dontSendNotification);
+        return;
+    }
+
+    practicing = true;
+    practiceType = PracticeType::Progression;
+    practicingProgressionId = progressionId;
+    challengeCompleted = false;
+    timedPhase = TimedPhase::Inactive;
+
+    startButton.setButtonText ("Stop");
+    startButton.setColour (juce::TextButton::buttonColourId, juce::Colour (ChordyTheme::dangerMuted));
+    nextButton.setEnabled (true);
+    playButton.setEnabled (true);
+
+    headerLabel.setText ("Practicing: " + prog->name, juce::dontSendNotification);
+
+    // Get the first key to practice
+    if (customMode)
+    {
+        buildCustomKeySequence();
+        auto challenge = getNextCustomChallenge();
+        loadProgressionChallenge (challenge.keyIndex);
+    }
+    else
+    {
+        // Use SR engine with progression ID to pick most overdue key
+        auto challenge = processorRef.spacedRepetition.getNextChallenge (progressionId);
+        loadProgressionChallenge (challenge.keyIndex);
+    }
+}
+
+void PracticePanel::loadProgressionChallenge (int keyIndex)
+{
+    const auto* prog = processorRef.progressionLibrary.getProgression (practicingProgressionId);
+    if (prog == nullptr)
+    {
+        stopPractice();
+        return;
+    }
+
+    // Transpose progression to the target key
+    int offset = (keyIndex - prog->keyPitchClass + 12) % 12;
+    progressionKeyOffset = offset;
+    transposedProgression = ProgressionLibrary::transposeProgression (*prog, offset);
+    progressionChordIndex = 0;
+
+    // Set up chart
+    practiceChart.setVisible (true);
+    practiceChart.setProgressionReadOnly (&transposedProgression);
+    practiceChart.setSelectedChord (0);
+
+    // Load first chord's target notes
+    const auto& chord = transposedProgression.chords[0];
+    targetNotes = chord.midiNotes;
+
+    juce::String keyName = ChordDetector::noteNameFromPitchClass (keyIndex);
+    targetLabel.setText ("Key: " + keyName + "  —  " + chord.getDisplayName(),
+                         juce::dontSendNotification);
+    targetLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::textPrimary));
+    feedbackLabel.setText ("", juce::dontSendNotification);
+    timingFeedbackLabel.setText ("", juce::dontSendNotification);
+
+    currentRootText = keyName;
+    currentRootColour = juce::Colour (ChordyTheme::textTertiary);
+    nextRootText = "";
+
+    // Show target on keyboard
+    keyboardRef.clearAllColours();
+    for (int note : targetNotes)
+        keyboardRef.setKeyColour (note, KeyColour::Target);
+    keyboardRef.repaint();
+
+    resized();
+    repaint();
+}
+
+void PracticePanel::advanceProgressionChord()
+{
+    progressionChordIndex++;
+
+    if (progressionChordIndex >= static_cast<int> (transposedProgression.chords.size()))
+    {
+        // Completed the whole progression in this key!
+        int keyIndex = (processorRef.progressionLibrary.getProgression (practicingProgressionId)->keyPitchClass
+                        + progressionKeyOffset) % 12;
+        processorRef.spacedRepetition.recordAttempt (practicingProgressionId, keyIndex, 4);
+        updateStats();
+
+        feedbackLabel.setText ("Complete! Moving to next key...", juce::dontSendNotification);
+        feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
+
+        // Get next key
+        int nextKey;
+        if (customMode)
+        {
+            auto challenge = getNextCustomChallenge();
+            nextKey = challenge.keyIndex;
+        }
+        else
+        {
+            auto challenge = processorRef.spacedRepetition.getNextChallenge (practicingProgressionId);
+            nextKey = challenge.keyIndex;
+        }
+
+        loadProgressionChallenge (nextKey);
+        return;
+    }
+
+    // Advance to next chord in the progression
+    const auto& chord = transposedProgression.chords[static_cast<size_t> (progressionChordIndex)];
+    targetNotes = chord.midiNotes;
+
+    practiceChart.setSelectedChord (progressionChordIndex);
+
+    int keyIndex = (processorRef.progressionLibrary.getProgression (practicingProgressionId)->keyPitchClass
+                    + progressionKeyOffset) % 12;
+    juce::String keyName = ChordDetector::noteNameFromPitchClass (keyIndex);
+    targetLabel.setText ("Key: " + keyName + "  —  " + chord.getDisplayName(),
+                         juce::dontSendNotification);
+    feedbackLabel.setText ("", juce::dontSendNotification);
+
+    keyboardRef.clearAllColours();
+    for (int note : targetNotes)
+        keyboardRef.setKeyColour (note, KeyColour::Target);
+    keyboardRef.repaint();
+}
+
+void PracticePanel::updateProgressionPractice (const std::vector<int>& activeNotes)
+{
+    // Auto-advance after success — wait for note release
+    if (challengeCompleted)
+    {
+        if (activeNotes.empty())
+        {
+            challengeCompleted = false;
+            advanceProgressionChord();
+        }
+        return;
+    }
+
+    if (activeNotes.empty())
+    {
+        keyboardRef.clearAllColours();
+        for (int note : targetNotes)
+            keyboardRef.setKeyColour (note, KeyColour::Target);
+        keyboardRef.repaint();
+        return;
+    }
+
+    updateKeyboardColours (activeNotes);
+
+    // Check pitch classes
+    std::set<int> targetPitchClasses;
+    for (int n : targetNotes)
+        targetPitchClasses.insert (n % 12);
+
+    std::set<int> playedPitchClasses;
+    for (int n : activeNotes)
+        playedPitchClasses.insert (n % 12);
+
+    if (playedPitchClasses == targetPitchClasses)
+    {
+        challengeCompleted = true;
+        feedbackLabel.setText ("Correct!", juce::dontSendNotification);
+        feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
+        currentRootColour = juce::Colour (ChordyTheme::successBright);
+    }
 }

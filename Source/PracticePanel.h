@@ -4,6 +4,8 @@
 #include "VoicingModel.h"
 #include "SpacedRepetition.h"
 #include "ChordDetector.h"
+#include "ProgressionModel.h"
+#include "ProgressionChartComponent.h"
 #include <set>
 #include <random>
 
@@ -11,6 +13,7 @@ class AudioPluginAudioProcessor;
 class ChordyKeyboardComponent;
 
 enum class RootOrder { Chromatic, Random };
+enum class PracticeType { Voicing, Progression };
 
 class PracticePanel : public juce::Component
 {
@@ -27,6 +30,9 @@ public:
     // Start practicing a specific voicing
     void startPractice (const juce::String& voicingId);
 
+    // Start practicing a progression
+    void startProgressionPractice (const juce::String& progressionId);
+
     // Stop practice mode
     void stopPractice();
 
@@ -39,11 +45,14 @@ public:
     juce::Colour getCurrentRootColour() const { return currentRootColour; }
     juce::String getNextRootText() const { return nextRootText; }
 
-    // Called by editor when user selects a voicing in the library
-    void setSelectedVoicingId (const juce::String& id) { selectedVoicingId = id; }
+    // Called by editor when user selects a voicing/progression in the library
+    void setSelectedVoicingId (const juce::String& id) { selectedVoicingId = id; practiceType = PracticeType::Voicing; }
+    void setSelectedProgressionId (const juce::String& id) { selectedProgressionId = id; practiceType = PracticeType::Progression; }
 
 private:
-    juce::String selectedVoicingId;  // tracks library panel selection
+    juce::String selectedVoicingId;
+    juce::String selectedProgressionId;
+    PracticeType practiceType = PracticeType::Voicing;
 
     // Main chord display state
     juce::String currentRootText;
@@ -95,8 +104,12 @@ private:
     double playPhaseStartBeatFraction = 0.0; // fractional beat position when play phase started
     PracticeChallenge nextChallenge;    // pre-fetched for prep display
 
-    // Untimed practice state (legacy)
-    // (challengeCompleted + challengeCompletedTime used for 1-second auto-advance)
+    // --- Progression practice state ---
+    juce::String practicingProgressionId;
+    Progression transposedProgression;  // current key's transposition
+    int progressionChordIndex = 0;      // which chord we're on
+    int progressionKeyOffset = 0;       // semitones from original key
+    ProgressionChartComponent practiceChart;
 
     static int computeQuality (double beatsElapsed, bool hadWrongAttempt);
 
@@ -109,9 +122,13 @@ private:
     void loadNextChallenge();
     void updateTimedPractice (const std::vector<int>& activeNotes);
     void updateUntimedPractice (const std::vector<int>& activeNotes);
+    void updateProgressionPractice (const std::vector<int>& activeNotes);
     void enterPlayPhase();
     void enterPrepPhase();
     void scorePlayPhase (const std::vector<int>& activeNotes);
     void updateKeyboardColours (const std::vector<int>& activeNotes);
     void updateStats();
+
+    void loadProgressionChallenge (int keyIndex);
+    void advanceProgressionChord();
 };

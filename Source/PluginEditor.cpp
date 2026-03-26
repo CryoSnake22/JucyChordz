@@ -75,6 +75,12 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
     keyboard.repaint();
   };
 
+  // Progression selection → practice panel
+  progressionLibraryPanel.onSelectionChanged = [this](const juce::String& progressionId) {
+    if (progressionId.isNotEmpty())
+      practicePanel.setSelectedProgressionId(progressionId);
+  };
+
   // Tabbed library panel
   libraryTabs.addTab("Voicings", juce::Colour(ChordyTheme::bgSurface), &voicingLibraryPanel, false);
   libraryTabs.addTab("Progressions", juce::Colour(ChordyTheme::bgSurface), &progressionLibraryPanel, false);
