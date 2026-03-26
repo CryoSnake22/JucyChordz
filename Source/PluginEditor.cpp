@@ -55,7 +55,13 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
       keyboard.repaint();
     }
   };
-  addAndMakeVisible(voicingLibraryPanel);
+  // Tabbed library panel
+  libraryTabs.addTab("Voicings", juce::Colour(0xFF222244), &voicingLibraryPanel, false);
+  libraryTabs.addTab("Progressions", juce::Colour(0xFF222244), &progressionsPanel, false);
+  libraryTabs.addTab("Melodies", juce::Colour(0xFF222244), &melodiesPanel, false);
+  libraryTabs.setTabBarDepth(28);
+  libraryTabs.setOutline(0);
+  addAndMakeVisible(libraryTabs);
 
   // Practice panel
   addAndMakeVisible(practicePanel);
@@ -130,15 +136,15 @@ void AudioPluginAudioProcessorEditor::resized() {
   auto bottomArea = area.reduced(8);
   auto libraryArea = bottomArea.removeFromLeft(getWidth() / 2 - 12);
   bottomArea.removeFromLeft(8);
-  voicingLibraryPanel.setBounds(libraryArea);
+  libraryTabs.setBounds(libraryArea);
   practicePanel.setBounds(bottomArea);
 }
 
 void AudioPluginAudioProcessorEditor::timerCallback() {
   auto notes = processorRef.getActiveNotes();
 
-  // During timed practice, override chord display with practice target
-  if (practicePanel.isTimedActive()) {
+  // During practice, override chord display with practice target
+  if (practicePanel.isPracticing()) {
     auto text = practicePanel.getPracticeDisplayText();
     if (text.isNotEmpty()) {
       chordDisplayLabel.setText(text, juce::dontSendNotification);
@@ -178,8 +184,10 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
   voicingLibraryPanel.updateRecording(notes);
 
   // Update practice mode
-  if (practicePanel.isPracticing())
+  if (practicePanel.isPracticing()) {
     practicePanel.updatePractice(notes);
+    voicingLibraryPanel.refreshStatsChart();
+  }
 
   // Update beat indicator
   beatIndicator.setBeatInfo(

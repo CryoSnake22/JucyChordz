@@ -5,6 +5,7 @@
 #include "VoicingLibraryPanel.h"
 #include "PracticePanel.h"
 #include "BeatIndicatorComponent.h"
+#include "PlaceholderPanel.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -34,8 +35,11 @@ private:
   // Keyboard
   ChordyKeyboardComponent keyboard;
 
-  // Panels
+  // Panels — tabbed library on left, practice on right
+  juce::TabbedComponent libraryTabs { juce::TabbedButtonBar::TabsAtTop };
   VoicingLibraryPanel voicingLibraryPanel;
+  PlaceholderPanel progressionsPanel { "Progressions — coming soon" };
+  PlaceholderPanel melodiesPanel { "Melodies — coming soon" };
   PracticePanel practicePanel;
 
   // Tempo bar

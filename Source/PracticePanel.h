@@ -64,6 +64,8 @@ private:
     // Key selector UI (visible when showingKeySelector)
     bool showingKeySelector = false;
     juce::ToggleButton keyToggles[12];
+    juce::TextButton selectAllButton { "All" };
+    juce::TextButton deselectAllButton { "None" };
     juce::ComboBox orderCombo;
 
     // Custom practice state

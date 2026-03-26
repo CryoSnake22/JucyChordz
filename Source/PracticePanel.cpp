@@ -59,6 +59,18 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
         addChildComponent (keyToggles[i]);
     }
 
+    selectAllButton.onClick = [this] {
+        for (int i = 0; i < 12; ++i)
+            keyToggles[i].setToggleState (true, juce::dontSendNotification);
+    };
+    addChildComponent (selectAllButton);
+
+    deselectAllButton.onClick = [this] {
+        for (int i = 0; i < 12; ++i)
+            keyToggles[i].setToggleState (false, juce::dontSendNotification);
+    };
+    addChildComponent (deselectAllButton);
+
     orderCombo.addItem ("Random", 1);
     orderCombo.addItem ("Chromatic", 2);
     orderCombo.setSelectedId (1, juce::dontSendNotification);
@@ -118,8 +130,13 @@ void PracticePanel::resized()
             keyToggles[i].setBounds (keyRow2.removeFromLeft (kw));
 
         area.removeFromTop (2);
-        // Order combo
-        orderCombo.setBounds (area.removeFromTop (24));
+        // [All] [None] [Order combo]
+        auto controlRow = area.removeFromTop (24);
+        selectAllButton.setBounds (controlRow.removeFromLeft (40));
+        controlRow.removeFromLeft (4);
+        deselectAllButton.setBounds (controlRow.removeFromLeft (45));
+        controlRow.removeFromLeft (8);
+        orderCombo.setBounds (controlRow);
     }
 
     area.removeFromTop (8);
@@ -146,6 +163,20 @@ void PracticePanel::onStartStop()
     {
         targetLabel.setText ("Record a voicing first!", juce::dontSendNotification);
         return;
+    }
+
+    // Block start if custom mode with no keys selected
+    if (customMode)
+    {
+        bool anySelected = false;
+        for (int i = 0; i < 12; ++i)
+            if (keyToggles[i].getToggleState())
+                anySelected = true;
+        if (! anySelected)
+        {
+            targetLabel.setText ("Select at least one key!", juce::dontSendNotification);
+            return;
+        }
     }
 
     // Turn metronome on
@@ -225,10 +256,15 @@ void PracticePanel::startPractice (const juce::String& voicingId)
         // Untimed mode: show target immediately
         timedPhase = TimedPhase::Inactive;
         juce::String keyName = ChordDetector::noteNameFromPitchClass (currentChallenge.keyIndex);
-        targetLabel.setText ("Play: " + keyName + ChordDetector::qualitySuffix (voicing->quality),
-                             juce::dontSendNotification);
+        juce::String chordText = keyName + ChordDetector::qualitySuffix (voicing->quality);
+        targetLabel.setText ("Play: " + chordText, juce::dontSendNotification);
+        targetLabel.setColour (juce::Label::textColourId, juce::Colours::white);
         feedbackLabel.setText ("", juce::dontSendNotification);
         timingFeedbackLabel.setText ("", juce::dontSendNotification);
+
+        // Show root in grey on main display
+        practiceDisplayText = chordText;
+        practiceDisplayColour = juce::Colour (0xFF889999);
 
         // Show target notes on keyboard
         keyboardRef.clearAllColours();
@@ -287,11 +323,10 @@ void PracticePanel::updatePractice (const std::vector<int>& activeNotes)
 
 void PracticePanel::updateUntimedPractice (const std::vector<int>& activeNotes)
 {
-    // Auto-advance after success
+    // Auto-advance after success — wait for note release then advance
     if (challengeCompleted)
     {
-        double now = juce::Time::currentTimeMillis() / 1000.0;
-        if (now - challengeCompletedTime > 1.0)
+        if (activeNotes.empty())
             loadNextChallenge();
         return;
     }
@@ -318,11 +353,14 @@ void PracticePanel::updateUntimedPractice (const std::vector<int>& activeNotes)
     if (playedPitchClasses == targetPitchClasses)
     {
         challengeCompleted = true;
-        challengeCompletedTime = juce::Time::currentTimeMillis() / 1000.0;
         processorRef.spacedRepetition.recordSuccess (
             currentChallenge.voicingId, currentChallenge.keyIndex);
         feedbackLabel.setText ("Correct!", juce::dontSendNotification);
         feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (0xFF00CC44));
+
+        // Flash green on main display
+        practiceDisplayColour = juce::Colour (0xFF00FF66);
+
         updateStats();
     }
 }
@@ -405,11 +443,16 @@ void PracticePanel::updateTimedPractice (const std::vector<int>& activeNotes)
             for (int n : activeNotes)
                 playedPitchClasses.insert (n % 12);
 
-            if (playedPitchClasses != targetPitchClasses)
-            {
+            // Only count as wrong if user played notes OUTSIDE the target set
+            // (partial matches = building up the chord = fine)
+            bool hasExtraNotes = false;
+            for (int pc : playedPitchClasses)
+                if (targetPitchClasses.count (pc) == 0)
+                    hasExtraNotes = true;
+            if (hasExtraNotes)
                 hasWrongAttempt = true;
-            }
-            else
+
+            if (playedPitchClasses == targetPitchClasses)
             {
                 // Correct! Score based on how far into the play phase
                 double beatFraction = beatsElapsed - static_cast<double> (beatInSequence - beatInCycle);
@@ -454,6 +497,31 @@ void PracticePanel::updateTimedPractice (const std::vector<int>& activeNotes)
         // --- PREP PHASE ---
         if (beatChanged && beatInCycle == 2)
             enterPrepPhase();
+
+        // Accept early play during prep — if user already has the correct chord,
+        // mark it so enterPlayPhase() can score it as quality 5
+        if (! activeNotes.empty() && ! playPhaseScored)
+        {
+            std::set<int> targetPC, playedPC;
+            for (int n : targetNotes) targetPC.insert (n % 12);
+            for (int n : activeNotes) playedPC.insert (n % 12);
+            if (playedPC == targetPC)
+            {
+                // Credit as perfect — they anticipated the change
+                processorRef.spacedRepetition.recordAttempt (
+                    currentChallenge.voicingId, currentChallenge.keyIndex, 5);
+                lastQualityScore = 5;
+                playPhaseScored = true;
+
+                feedbackLabel.setText ("Correct!", juce::dontSendNotification);
+                feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (0xFF00CC44));
+                timingFeedbackLabel.setText ("Early - Perfect!", juce::dontSendNotification);
+                timingFeedbackLabel.setColour (juce::Label::textColourId, juce::Colour (0xFF00CC44));
+                updateStats();
+
+                updateKeyboardColours (activeNotes);
+            }
+        }
     }
 }
 
@@ -541,8 +609,53 @@ void PracticePanel::enterPrepPhase()
 void PracticePanel::loadNextChallenge()
 {
     challengeCompleted = false;
-    startPractice (practicingVoicingId.isNotEmpty() ? practicingVoicingId
-                                                    : currentChallenge.voicingId);
+
+    juce::String vid = practicingVoicingId.isNotEmpty() ? practicingVoicingId
+                                                        : currentChallenge.voicingId;
+
+    // Get next challenge without rebuilding custom sequence
+    if (customMode)
+        currentChallenge = getNextCustomChallenge();
+    else
+        currentChallenge = processorRef.spacedRepetition.getNextChallenge (vid);
+
+    const auto* voicing = processorRef.voicingLibrary.getVoicing (vid);
+    if (voicing == nullptr)
+    {
+        stopPractice();
+        return;
+    }
+
+    targetNotes = VoicingLibrary::transposeToKey (*voicing, currentChallenge.rootMidiNote);
+
+    bool timedMode = timedToggle.getToggleState();
+
+    if (timedMode)
+    {
+        // In timed mode, loadNextChallenge is only used from untimed path fallback
+        // Timed mode uses enterPrepPhase/enterPlayPhase cycle instead
+        timedPhase = TimedPhase::Play;
+        playPhaseScored = false;
+        hasWrongAttempt = false;
+        enterPlayPhase();
+    }
+    else
+    {
+        juce::String keyName = ChordDetector::noteNameFromPitchClass (currentChallenge.keyIndex);
+        juce::String chordText = keyName + ChordDetector::qualitySuffix (voicing->quality);
+        targetLabel.setText ("Play: " + chordText, juce::dontSendNotification);
+        targetLabel.setColour (juce::Label::textColourId, juce::Colours::white);
+        feedbackLabel.setText ("", juce::dontSendNotification);
+
+        // Show root in grey on main display
+        practiceDisplayText = chordText;
+        practiceDisplayColour = juce::Colour (0xFF889999);
+
+        keyboardRef.clearAllColours();
+        for (int note : targetNotes)
+            keyboardRef.setKeyColour (note, KeyColour::Target);
+        keyboardRef.repaint();
+    }
 }
 
 int PracticePanel::computeQuality (double beatsElapsed, bool hadWrongAttempt)
@@ -636,6 +749,8 @@ void PracticePanel::onCustomToggle()
 
     for (int i = 0; i < 12; ++i)
         keyToggles[i].setVisible (showingKeySelector);
+    selectAllButton.setVisible (showingKeySelector);
+    deselectAllButton.setVisible (showingKeySelector);
     orderCombo.setVisible (showingKeySelector);
 
     customMode = showingKeySelector;

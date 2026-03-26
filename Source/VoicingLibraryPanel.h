@@ -25,6 +25,9 @@ public:
     // Get the currently selected voicing ID (empty if none)
     juce::String getSelectedVoicingId() const;
 
+    // Refresh the stats chart for the currently selected voicing (call during practice)
+    void refreshStatsChart();
+
     // Callback when selection changes
     std::function<void (const juce::String& voicingId)> onSelectionChanged;
 

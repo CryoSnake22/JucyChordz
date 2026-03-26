@@ -318,6 +318,13 @@ juce::String VoicingLibraryPanel::getSelectedVoicingId() const
     return {};
 }
 
+void VoicingLibraryPanel::refreshStatsChart()
+{
+    auto selectedId = getSelectedVoicingId();
+    if (selectedId.isNotEmpty())
+        statsChart.setStats (processorRef.spacedRepetition.getStatsForVoicing (selectedId));
+}
+
 void VoicingLibraryPanel::updateDisplayedVoicings()
 {
     int filterId = qualityFilter.getSelectedId();
