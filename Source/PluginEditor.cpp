@@ -45,18 +45,20 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
     if (voicingId.isNotEmpty() && practicePanel.isPracticing()) {
       // Switch to practicing the newly selected voicing
       practicePanel.stopPractice();
-      // Turn metronome back on for the new voicing
-      if (auto* param = processorRef.apvts.getParameter("metronomeOn"))
-        param->setValueNotifyingHost(1.0f);
+      // Turn metronome back on for the new voicing (only if timed mode)
+      if (practicePanel.isTimedMode())
+        if (auto* param = processorRef.apvts.getParameter("metronomeOn"))
+          param->setValueNotifyingHost(1.0f);
       practicePanel.startPractice(voicingId);
     } else if (voicingId.isNotEmpty()) {
-      // Preview: highlight original voicing notes on keyboard
+      // Preview: highlight original voicing notes on keyboard + play via synth
       keyboard.clearAllColours();
       const auto *v = processorRef.voicingLibrary.getVoicing(voicingId);
       if (v != nullptr) {
         auto notes = VoicingLibrary::transposeToKey(*v, v->octaveReference);
         for (int note : notes)
           keyboard.setKeyColour(note, KeyColour::Target);
+        startVoicingPreview(notes);
       }
       keyboard.repaint();
     } else {
@@ -99,6 +101,18 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
       processorRef.apvts, "useHostSync", hostSyncToggle);
 
   addAndMakeVisible(beatIndicator);
+
+  // Synth toggle + volume
+  addAndMakeVisible(synthToggle);
+  synthToggleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+      processorRef.apvts, "synthEnabled", synthToggle);
+
+  synthVolumeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+  synthVolumeSlider.setTextBoxStyle(juce::Slider::NoTextBox, true, 0, 0);
+  synthVolumeSlider.setColour(juce::Slider::textBoxTextColourId, juce::Colour(ChordyTheme::textSecondary));
+  addAndMakeVisible(synthVolumeSlider);
+  synthVolumeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      processorRef.apvts, "synthVolume", synthVolumeSlider);
 
   setSize(1000, 660);
   startTimerHz(60);
@@ -153,6 +167,10 @@ void AudioPluginAudioProcessorEditor::resized() {
   tempoArea.removeFromLeft(4);
   hostSyncToggle.setBounds(tempoArea.removeFromLeft(75));
   tempoArea.removeFromLeft(8);
+  synthToggle.setBounds(tempoArea.removeFromLeft(75));
+  tempoArea.removeFromLeft(4);
+  synthVolumeSlider.setBounds(tempoArea.removeFromLeft(70));
+  tempoArea.removeFromLeft(8);
   beatIndicator.setBounds(tempoArea);
 
   // Bottom panels: library on left, practice on right
@@ -205,8 +223,8 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
     }
   }
 
-  // Clear voicing preview highlight when user plays notes (not during practice)
-  if (!notes.empty() && !practicePanel.isPracticing()) {
+  // Clear voicing preview highlight when user plays notes (not during practice/preview)
+  if (!notes.empty() && !practicePanel.isPracticing() && previewNotes.empty()) {
     keyboard.clearAllColours();
     keyboard.repaint();
   }
@@ -220,6 +238,12 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
     voicingLibraryPanel.refreshStatsChart();
   }
 
+  // Voicing preview auto-off
+  if (previewFramesRemaining > 0) {
+    if (--previewFramesRemaining == 0)
+      stopVoicingPreview();
+  }
+
   // Update beat indicator
   beatIndicator.setBeatInfo(
       processorRef.tempoEngine.getBeatNumber(),
@@ -229,4 +253,45 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
 
   // Disable BPM slider when syncing to host
   bpmSlider.setEnabled(! hostSyncToggle.getToggleState());
+}
+
+void AudioPluginAudioProcessorEditor::startVoicingPreview (const std::vector<int>& notes)
+{
+  stopVoicingPreview();
+
+  int channel = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
+
+  // Send MIDI directly to synth (bypasses keyboardState — no keyboard flash)
+  for (int note : notes)
+    processorRef.addPreviewMidi (juce::MidiMessage::noteOn (channel, note, 0.8f));
+
+  // Show green highlights on keyboard
+  keyboard.clearAllColours();
+  for (int note : notes)
+    keyboard.setKeyColour (note, KeyColour::Correct);
+  keyboard.repaint();
+
+  previewNotes = notes;
+  previewFramesRemaining = previewDurationFrames;
+}
+
+void AudioPluginAudioProcessorEditor::stopVoicingPreview()
+{
+  if (previewNotes.empty())
+    return;
+
+  int channel = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
+
+  // Send note-offs directly to synth
+  for (int note : previewNotes)
+    processorRef.addPreviewMidi (juce::MidiMessage::noteOff (channel, note, 0.0f));
+
+  // Keep light green highlights after playback
+  keyboard.clearAllColours();
+  for (int note : previewNotes)
+    keyboard.setKeyColour (note, KeyColour::Correct);
+  keyboard.repaint();
+
+  previewNotes.clear();
+  previewFramesRemaining = 0;
 }

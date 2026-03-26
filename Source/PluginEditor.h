@@ -52,9 +52,23 @@ private:
   juce::ToggleButton hostSyncToggle { "Sync" };
   BeatIndicatorComponent beatIndicator;
 
+  // Synth controls
+  juce::ToggleButton synthToggle { "Synth" };
+  juce::Slider synthVolumeSlider;
+
   std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> bpmAttachment;
   std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> metronomeAttachment;
   std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> hostSyncAttachment;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> synthToggleAttachment;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> synthVolumeAttachment;
+
+  // Voicing preview playback
+  std::vector<int> previewNotes;
+  int previewFramesRemaining = 0;
+  static constexpr int previewDurationFrames = 30; // ~0.5s hold, then release envelope fades
+
+  void startVoicingPreview (const std::vector<int>& notes);
+  void stopVoicingPreview();
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessorEditor)
 };

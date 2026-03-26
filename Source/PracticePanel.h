@@ -32,6 +32,7 @@ public:
 
     bool isPracticing() const { return practicing; }
     bool isTimedActive() const { return timedPhase != TimedPhase::Inactive; }
+    bool isTimedMode() const { return timedToggle.getToggleState(); }
 
     // Get current practice display for the main chord area above the keyboard
     juce::String getCurrentRootText() const { return currentRootText; }

@@ -178,9 +178,10 @@ void PracticePanel::onStartStop()
         }
     }
 
-    // Turn metronome on
-    if (auto* param = processorRef.apvts.getParameter ("metronomeOn"))
-        param->setValueNotifyingHost (1.0f);
+    // Turn metronome on only for timed mode
+    if (timedToggle.getToggleState())
+        if (auto* param = processorRef.apvts.getParameter ("metronomeOn"))
+            param->setValueNotifyingHost (1.0f);
 
     // Use selected voicing, or fall back to first available
     juce::String voicingToUse = selectedVoicingId;

@@ -4,6 +4,7 @@
 #include "VoicingModel.h"
 #include "SpacedRepetition.h"
 #include "TempoEngine.h"
+#include "ChordySynth.h"
 #include <atomic>
 #include <mutex>
 
@@ -70,7 +71,15 @@ public:
   // Tempo engine (metronome + beat tracking)
   TempoEngine tempoEngine;
 
+  // Internal synth (Rhodes-like FM, for audible playback)
+  ChordySynth internalSynth;
+
+  // Preview MIDI injection — GUI thread pushes, audio thread drains into synth
+  void addPreviewMidi (const juce::MidiMessage& msg);
+
 private:
+  juce::SpinLock previewMidiLock;
+  juce::MidiBuffer previewMidiBuffer;
   mutable std::mutex lastPlayedNotesMutex;
   std::vector<int> lastPlayedNotes;
 

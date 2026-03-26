@@ -31,6 +31,14 @@ AudioPluginAudioProcessor::createParameterLayout() {
       juce::ParameterID{"responseWindowBeats", 1}, "Response Window (beats)",
       juce::NormalisableRange<float>(1.0f, 8.0f, 0.5f), 4.0f));
 
+  // Internal synth parameters
+  layout.add(std::make_unique<juce::AudioParameterBool>(
+      juce::ParameterID{"synthEnabled", 1}, "Synth", true));
+
+  layout.add(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{"synthVolume", 1}, "Synth Volume",
+      juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.7f));
+
   return layout;
 }
 
@@ -83,7 +91,7 @@ bool AudioPluginAudioProcessor::isMidiEffect() const {
 #endif
 }
 
-double AudioPluginAudioProcessor::getTailLengthSeconds() const { return 0.0; }
+double AudioPluginAudioProcessor::getTailLengthSeconds() const { return 0.5; }
 
 int AudioPluginAudioProcessor::getNumPrograms() {
   return 1;
@@ -109,6 +117,7 @@ void AudioPluginAudioProcessor::changeProgramName(int index,
 void AudioPluginAudioProcessor::prepareToPlay(double sampleRate,
                                               int samplesPerBlock) {
   tempoEngine.prepare(sampleRate, samplesPerBlock);
+  internalSynth.setCurrentPlaybackSampleRate(sampleRate);
 }
 
 void AudioPluginAudioProcessor::releaseResources() {}
@@ -170,6 +179,22 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
     for (int i = 0; i < 64; ++i)
       if (high & (uint64_t(1) << i))
         lastPlayedNotes.push_back(i + 64);
+  }
+
+  // Merge preview MIDI (voicing preview from GUI thread)
+  {
+    juce::SpinLock::ScopedLockType lock(previewMidiLock);
+    if (! previewMidiBuffer.isEmpty()) {
+      for (const auto meta : previewMidiBuffer)
+        midiMessages.addEvent(meta.getMessage(), meta.samplePosition);
+      previewMidiBuffer.clear();
+    }
+  }
+
+  // Internal synth — render MIDI as audio (Rhodes-like FM)
+  if (*apvts.getRawParameterValue("synthEnabled") > 0.5f) {
+    internalSynth.setVolume(*apvts.getRawParameterValue("synthVolume"));
+    internalSynth.renderNextBlock(buffer, midiMessages, 0, buffer.getNumSamples());
   }
 
   // Advance tempo engine — renders metronome click into buffer
@@ -236,6 +261,11 @@ void AudioPluginAudioProcessor::setStateInformation(const void *data,
 
     apvts.replaceState(state);
   }
+}
+
+void AudioPluginAudioProcessor::addPreviewMidi (const juce::MidiMessage& msg) {
+  juce::SpinLock::ScopedLockType lock(previewMidiLock);
+  previewMidiBuffer.addEvent(msg, 0);
 }
 
 //==============================================================================
