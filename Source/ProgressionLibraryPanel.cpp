@@ -118,7 +118,10 @@ ProgressionLibraryPanel::ProgressionLibraryPanel (AudioPluginAudioProcessor& pro
     addAndMakeVisible (editButton);
 
     deleteButton.onClick = [this] { onDelete(); };
+    deleteButton.setColour (juce::TextButton::buttonColourId, juce::Colour (ChordyTheme::dangerMuted));
     addAndMakeVisible (deleteButton);
+
+    addAndMakeVisible (statsChart);
 
     // --- Editing ---
     editHeader.setText ("EDIT PROGRESSION", juce::dontSendNotification);
@@ -315,6 +318,11 @@ void ProgressionLibraryPanel::layoutIdleMode (juce::Rectangle<int> area)
     area.removeFromBottom (4);
     chartPreview.setBounds (chartArea);
 
+    // Stats chart between list and chart preview
+    auto statsArea = area.removeFromBottom (60);
+    area.removeFromBottom (4);
+    statsChart.setBounds (statsArea);
+
     progressionList.setBounds (area);
 }
 
@@ -417,6 +425,7 @@ void ProgressionLibraryPanel::setIdleModeVisible (bool v)
     headerLabel.setVisible (v);
     progressionList.setVisible (v);
     chartPreview.setVisible (v);
+    statsChart.setVisible (v);
     recordButton.setVisible (v);
     playButton.setVisible (v);
     editButton.setVisible (v);
@@ -852,9 +861,19 @@ void ProgressionLibraryPanel::onTranspose (int semitones)
     processorRef.stopProgressionPlayback();
     pendingProgression = ProgressionLibrary::transposeProgression (pendingProgression, semitones);
 
-    editChart.setSelectedChord (-1);
+    editChart.setSelectedChord (0);
     editChart.setProgression (&pendingProgression);
     editChart.repaint();
+
+    // Preview the first chord so the user hears the new key
+    if (! pendingProgression.chords.empty())
+    {
+        const auto& firstChord = pendingProgression.chords[0];
+        playChordPreview (firstChord);
+        if (onChordPreview)
+            onChordPreview (firstChord.midiNotes);
+        onEditChordSelected (0);
+    }
 }
 
 void ProgressionLibraryPanel::onPlayToggle()
@@ -941,11 +960,21 @@ void ProgressionLibraryPanel::paintListBoxItem (int rowNumber, juce::Graphics& g
     g.drawText (badge, width - 90, 0, 82, height, juce::Justification::centredRight);
 }
 
+void ProgressionLibraryPanel::refreshStatsChart()
+{
+    auto id = getSelectedProgressionId();
+    if (id.isNotEmpty())
+        statsChart.setStats (processorRef.spacedRepetition.getStatsForVoicing (id));
+    else
+        statsChart.clearStats();
+}
+
 void ProgressionLibraryPanel::selectedRowsChanged (int)
 {
     auto id = getSelectedProgressionId();
     const auto* prog = processorRef.progressionLibrary.getProgression (id);
     chartPreview.setProgressionReadOnly (prog);
+    refreshStatsChart();
 
     if (onSelectionChanged)
         onSelectionChanged (id);

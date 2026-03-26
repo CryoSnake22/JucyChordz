@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "ProgressionModel.h"
 #include "ProgressionChartComponent.h"
+#include "VoicingStatsChart.h"
 
 class AudioPluginAudioProcessor;
 
@@ -24,6 +25,7 @@ public:
     void updateTimerCallback();
 
     juce::String getSelectedProgressionId() const;
+    void refreshStatsChart();
 
     std::function<void (const juce::String& progressionId)> onSelectionChanged;
     std::function<void (const std::vector<int>& midiNotes)> onChordPreview;
@@ -49,6 +51,7 @@ private:
     juce::TextButton playButton { "Play" };
     juce::TextButton editButton { "Edit" };
     juce::TextButton deleteButton { "Delete" };
+    VoicingStatsChart statsChart;
 
     // --- Count-in state ---
     int countInBeatsElapsed = 0;

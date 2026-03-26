@@ -208,17 +208,13 @@ void ProgressionChartComponent::mouseDown (const juce::MouseEvent& e)
         }
     }
 
-    // Normal click — select chord
+    // Normal click — select chord (always fire callback, even if re-clicking same chord)
     int hit = hitTestChord (e.position);
+    selectedChordIndex = hit;
+    repaint();
 
-    if (hit != selectedChordIndex)
-    {
-        selectedChordIndex = hit;
-        repaint();
-
-        if (onChordSelected)
-            onChordSelected (selectedChordIndex);
-    }
+    if (onChordSelected)
+        onChordSelected (selectedChordIndex);
 }
 
 void ProgressionChartComponent::mouseDrag (const juce::MouseEvent& e)

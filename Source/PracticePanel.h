@@ -110,6 +110,11 @@ private:
     int progressionChordIndex = 0;      // which chord we're on
     int progressionKeyOffset = 0;       // semitones from original key
     ProgressionChartComponent practiceChart;
+    double progressionTimedBeat = 0.0;           // current beat in timed progression practice
+    std::set<int> progressionTimedScored;         // chord indices already scored this run
+    int progressionChordsCorrect = 0;             // chords scored >= Q3
+    int progressionChordsTotal = 0;               // total chords in progression
+    int progressionQualitySum = 0;                // sum of all chord qualities (for avg)
 
     static int computeQuality (double beatsElapsed, bool hadWrongAttempt);
 

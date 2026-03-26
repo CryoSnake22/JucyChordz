@@ -802,21 +802,45 @@ void PracticePanel::onNext()
     if (! practicing)
         return;
 
+    // --- Progression practice ---
+    if (practiceType == PracticeType::Progression)
+    {
+        feedbackLabel.setText ("Skipped", juce::dontSendNotification);
+        feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::danger));
+
+        if (timedPhase != TimedPhase::Inactive)
+        {
+            // Timed: mark current chord as missed (Q0)
+            if (progressionChordIndex >= 0
+                && progressionTimedScored.count (progressionChordIndex) == 0)
+            {
+                progressionTimedScored.insert (progressionChordIndex);
+                progressionQualitySum += 0;
+            }
+            // Don't advance manually — cursor will move with the beat
+        }
+        else
+        {
+            // Untimed: skip to next chord, record as miss (don't count as correct)
+            challengeCompleted = false;
+            advanceProgressionChord();
+        }
+        return;
+    }
+
+    // --- Voicing practice ---
     if (timedPhase != TimedPhase::Inactive)
     {
-        // In timed mode, skip to next — score current as failure if not scored
         if (! playPhaseScored && timedPhase == TimedPhase::Play)
         {
             processorRef.spacedRepetition.recordAttempt (
                 currentChallenge.voicingId, currentChallenge.keyIndex, 0);
             updateStats();
         }
-        // Force into prep for next
         enterPrepPhase();
     }
     else
     {
-        // Untimed mode
         if (! challengeCompleted)
         {
             processorRef.spacedRepetition.recordFailure (
@@ -902,15 +926,22 @@ void PracticePanel::onPlay()
     if (targetNotes.empty())
         return;
 
+    // Just play the sound and show on keyboard — no scoring, no advancing
     int channel = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
     for (int note : targetNotes)
-        processorRef.keyboardState.noteOn (channel, note, 0.8f);
+        processorRef.addPreviewMidi (juce::MidiMessage::noteOn (channel, note, 0.7f));
 
-    juce::Timer::callAfterDelay (800, [this, channel]
+    auto notesToRelease = targetNotes;
+    juce::Timer::callAfterDelay (600, [this, channel, notesToRelease]
     {
-        for (int note : targetNotes)
-            processorRef.keyboardState.noteOff (channel, note, 0.0f);
+        for (int note : notesToRelease)
+            processorRef.addPreviewMidi (juce::MidiMessage::noteOff (channel, note, 0.0f));
     });
+
+    keyboardRef.clearAllColours();
+    for (int note : targetNotes)
+        keyboardRef.setKeyColour (note, KeyColour::Correct);
+    keyboardRef.repaint();
 }
 
 //==============================================================================
@@ -930,7 +961,23 @@ void PracticePanel::startProgressionPractice (const juce::String& progressionId)
     practiceType = PracticeType::Progression;
     practicingProgressionId = progressionId;
     challengeCompleted = false;
-    timedPhase = TimedPhase::Inactive;
+    progressionTimedBeat = 0.0;
+    progressionTimedScored.clear();
+
+    // Turn on metronome for timed mode
+    if (timedToggle.getToggleState())
+    {
+        if (auto* param = processorRef.apvts.getParameter ("metronomeOn"))
+            param->setValueNotifyingHost (1.0f);
+        processorRef.tempoEngine.resetBeatPosition();
+        processorRef.tempoEngine.markChallengeStart();
+        timedPhase = TimedPhase::CountIn;
+        lastBeatInSequence = -1;
+    }
+    else
+    {
+        timedPhase = TimedPhase::Inactive;
+    }
 
     startButton.setButtonText ("Stop");
     startButton.setColour (juce::TextButton::buttonColourId, juce::Colour (ChordyTheme::dangerMuted));
@@ -968,6 +1015,9 @@ void PracticePanel::loadProgressionChallenge (int keyIndex)
     progressionKeyOffset = offset;
     transposedProgression = ProgressionLibrary::transposeProgression (*prog, offset);
     progressionChordIndex = 0;
+    progressionChordsCorrect = 0;
+    progressionChordsTotal = 0;
+    progressionQualitySum = 0;
 
     // Set up chart
     practiceChart.setVisible (true);
@@ -1005,14 +1055,31 @@ void PracticePanel::advanceProgressionChord()
 
     if (progressionChordIndex >= static_cast<int> (transposedProgression.chords.size()))
     {
-        // Completed the whole progression in this key!
+        // Completed the whole progression in this key
+        progressionChordsTotal = static_cast<int> (transposedProgression.chords.size());
+
+        // Compute quality from ratio
+        int quality = 0;
+        if (progressionChordsTotal > 0)
+        {
+            double ratio = static_cast<double> (progressionChordsCorrect) / progressionChordsTotal;
+            if (ratio >= 0.95) quality = 5;
+            else if (ratio >= 0.8) quality = 4;
+            else if (ratio >= 0.6) quality = 3;
+            else if (ratio >= 0.4) quality = 2;
+            else if (ratio > 0.0) quality = 1;
+        }
+
         int keyIndex = (processorRef.progressionLibrary.getProgression (practicingProgressionId)->keyPitchClass
                         + progressionKeyOffset) % 12;
-        processorRef.spacedRepetition.recordAttempt (practicingProgressionId, keyIndex, 4);
+        processorRef.spacedRepetition.recordAttempt (practicingProgressionId, keyIndex, quality);
         updateStats();
 
-        feedbackLabel.setText ("Complete! Moving to next key...", juce::dontSendNotification);
-        feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
+        juce::String scoreText = juce::String (progressionChordsCorrect) + "/"
+                                 + juce::String (progressionChordsTotal);
+        feedbackLabel.setText ("Complete! " + scoreText + " correct", juce::dontSendNotification);
+        feedbackLabel.setColour (juce::Label::textColourId,
+            quality >= 3 ? juce::Colour (ChordyTheme::success) : juce::Colour (ChordyTheme::danger));
 
         // Get next key
         int nextKey;
@@ -1052,6 +1119,195 @@ void PracticePanel::advanceProgressionChord()
 
 void PracticePanel::updateProgressionPractice (const std::vector<int>& activeNotes)
 {
+    bool timedMode = (timedPhase != TimedPhase::Inactive);
+
+    if (timedMode)
+    {
+        double beatsElapsed = processorRef.tempoEngine.getBeatsSinceChallengeStart();
+        int beatInt = static_cast<int> (std::floor (beatsElapsed));
+
+        // --- Count-in (4 beats) ---
+        if (beatInt < 4)
+        {
+            if (beatInt != lastBeatInSequence)
+            {
+                lastBeatInSequence = beatInt;
+                int countdown = 4 - beatInt;
+                targetLabel.setText (juce::String (countdown) + "...", juce::dontSendNotification);
+                feedbackLabel.setText ("", juce::dontSendNotification);
+
+                // Show first chord on beats 2-3
+                if (beatInt >= 2 && ! transposedProgression.chords.empty())
+                {
+                    const auto& firstChord = transposedProgression.chords[0];
+                    int keyIdx = (processorRef.progressionLibrary.getProgression (practicingProgressionId)->keyPitchClass
+                                  + progressionKeyOffset) % 12;
+                    currentRootText = ChordDetector::noteNameFromPitchClass (keyIdx);
+                    currentRootColour = juce::Colour (ChordyTheme::textPrimary);
+
+                    keyboardRef.clearAllColours();
+                    for (int note : firstChord.midiNotes)
+                        keyboardRef.setKeyColour (note, KeyColour::Target);
+                    keyboardRef.repaint();
+                }
+            }
+            return;
+        }
+
+        // --- After count-in: cursor follows beats through the progression ---
+        double progressBeat = beatsElapsed - 4.0;
+        progressionTimedBeat = progressBeat;
+        practiceChart.setCursorBeat (progressBeat);
+
+        // Find which chord should be active at this beat
+        int targetChordIdx = -1;
+        for (int ci = 0; ci < static_cast<int> (transposedProgression.chords.size()); ++ci)
+        {
+            const auto& c = transposedProgression.chords[static_cast<size_t> (ci)];
+            if (progressBeat >= c.startBeat && progressBeat < c.startBeat + c.durationBeats)
+            {
+                targetChordIdx = ci;
+                break;
+            }
+        }
+
+        // Progression ended — score any remaining unscored chords as misses
+        if (progressBeat >= transposedProgression.totalBeats)
+        {
+            progressionChordsTotal = static_cast<int> (transposedProgression.chords.size());
+
+            // Score any remaining unscored chords as Q0
+            for (int ci = 0; ci < progressionChordsTotal; ++ci)
+            {
+                if (progressionTimedScored.count (ci) == 0)
+                    progressionQualitySum += 0; // missed
+            }
+
+            // Overall quality = average of per-chord qualities, rounded
+            int quality = 0;
+            if (progressionChordsTotal > 0)
+                quality = juce::jlimit (0, 5,
+                    juce::roundToInt (static_cast<double> (progressionQualitySum) / progressionChordsTotal));
+
+            int keyIdx = (processorRef.progressionLibrary.getProgression (practicingProgressionId)->keyPitchClass
+                          + progressionKeyOffset) % 12;
+            processorRef.spacedRepetition.recordAttempt (practicingProgressionId, keyIdx, quality);
+            updateStats();
+
+            juce::String scoreText = juce::String (progressionChordsCorrect) + "/"
+                                     + juce::String (progressionChordsTotal) + " chords";
+            feedbackLabel.setText ("Complete! " + scoreText, juce::dontSendNotification);
+            feedbackLabel.setColour (juce::Label::textColourId,
+                quality >= 3 ? juce::Colour (ChordyTheme::success) : juce::Colour (ChordyTheme::danger));
+
+            // Reset for next key — brief silence to avoid click
+            processorRef.tempoEngine.resetBeatPosition();
+            processorRef.tempoEngine.markChallengeStart();
+            lastBeatInSequence = -1;
+            progressionTimedScored.clear();
+
+            int nextKey;
+            if (customMode)
+                nextKey = getNextCustomChallenge().keyIndex;
+            else
+                nextKey = processorRef.spacedRepetition.getNextChallenge (practicingProgressionId).keyIndex;
+
+            loadProgressionChallenge (nextKey);
+            return;
+        }
+
+        // Update current chord if it changed — score missed chords
+        if (targetChordIdx >= 0 && targetChordIdx != progressionChordIndex)
+        {
+            // Any chords between the old and new index that weren't scored = missed (Q0)
+            for (int ci = progressionChordIndex; ci < targetChordIdx; ++ci)
+            {
+                if (progressionTimedScored.count (ci) == 0)
+                {
+                    progressionTimedScored.insert (ci);
+                    progressionQualitySum += 0; // Q0 timeout
+                    // Don't count as correct
+                }
+            }
+
+            progressionChordIndex = targetChordIdx;
+            const auto& chord = transposedProgression.chords[static_cast<size_t> (targetChordIdx)];
+            targetNotes = chord.midiNotes;
+            practiceChart.setSelectedChord (targetChordIdx);
+
+            int keyIdx = (processorRef.progressionLibrary.getProgression (practicingProgressionId)->keyPitchClass
+                          + progressionKeyOffset) % 12;
+            juce::String keyName = ChordDetector::noteNameFromPitchClass (keyIdx);
+            targetLabel.setText ("Key: " + keyName + "  —  " + chord.getDisplayName(),
+                                 juce::dontSendNotification);
+
+            if (progressionTimedScored.count (targetChordIdx) == 0)
+            {
+                feedbackLabel.setText ("GO!", juce::dontSendNotification);
+                feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::successBright));
+                timingFeedbackLabel.setText ("", juce::dontSendNotification);
+            }
+
+            keyboardRef.clearAllColours();
+            for (int note : targetNotes)
+                keyboardRef.setKeyColour (note, KeyColour::Target);
+            keyboardRef.repaint();
+        }
+
+        // Check if user is playing the correct chord
+        if (targetChordIdx >= 0 && progressionTimedScored.count (targetChordIdx) == 0
+            && ! activeNotes.empty())
+        {
+            updateKeyboardColours (activeNotes);
+
+            std::set<int> targetPC, playedPC;
+            for (int n : targetNotes) targetPC.insert (n % 12);
+            for (int n : activeNotes) playedPC.insert (n % 12);
+
+            if (playedPC == targetPC)
+            {
+                progressionTimedScored.insert (targetChordIdx);
+
+                const auto& chord = transposedProgression.chords[static_cast<size_t> (targetChordIdx)];
+                double beatIntoChord = progressBeat - chord.startBeat;
+                int quality = computeQuality (beatIntoChord, false);
+
+                progressionQualitySum += quality;
+                if (quality >= 3)
+                    progressionChordsCorrect++;
+
+                feedbackLabel.setText ("Correct!", juce::dontSendNotification);
+                feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
+
+                juce::String qualityText;
+                juce::Colour qualityColour;
+                switch (quality)
+                {
+                    case 5:  qualityText = "Perfect!";  qualityColour = juce::Colour (ChordyTheme::qualityPerfect); break;
+                    case 4:  qualityText = "Good";      qualityColour = juce::Colour (ChordyTheme::qualityGood); break;
+                    case 3:  qualityText = "OK";        qualityColour = juce::Colour (ChordyTheme::qualityOk); break;
+                    case 2:  qualityText = "Slow";      qualityColour = juce::Colour (ChordyTheme::qualitySlow); break;
+                    default: qualityText = "Late";      qualityColour = juce::Colour (ChordyTheme::qualityTimeout); break;
+                }
+                timingFeedbackLabel.setText (juce::String (beatIntoChord, 1) + " beats - " + qualityText,
+                                             juce::dontSendNotification);
+                timingFeedbackLabel.setColour (juce::Label::textColourId, qualityColour);
+            }
+        }
+        else if (activeNotes.empty() && targetChordIdx >= 0
+                 && progressionTimedScored.count (targetChordIdx) == 0)
+        {
+            keyboardRef.clearAllColours();
+            for (int note : targetNotes)
+                keyboardRef.setKeyColour (note, KeyColour::Target);
+            keyboardRef.repaint();
+        }
+
+        return;
+    }
+
+    // --- Untimed progression practice ---
+
     // Auto-advance after success — wait for note release
     if (challengeCompleted)
     {
@@ -1074,7 +1330,6 @@ void PracticePanel::updateProgressionPractice (const std::vector<int>& activeNot
 
     updateKeyboardColours (activeNotes);
 
-    // Check pitch classes
     std::set<int> targetPitchClasses;
     for (int n : targetNotes)
         targetPitchClasses.insert (n % 12);
@@ -1086,6 +1341,7 @@ void PracticePanel::updateProgressionPractice (const std::vector<int>& activeNot
     if (playedPitchClasses == targetPitchClasses)
     {
         challengeCompleted = true;
+        progressionChordsCorrect++;
         feedbackLabel.setText ("Correct!", juce::dontSendNotification);
         feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
         currentRootColour = juce::Colour (ChordyTheme::successBright);

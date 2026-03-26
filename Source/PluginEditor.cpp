@@ -268,6 +268,7 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
   if (practicePanel.isPracticing()) {
     practicePanel.updatePractice(notes);
     voicingLibraryPanel.refreshStatsChart();
+    progressionLibraryPanel.refreshStatsChart();
   }
 
   // Voicing preview auto-off

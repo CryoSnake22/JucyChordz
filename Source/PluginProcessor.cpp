@@ -341,6 +341,12 @@ void AudioPluginAudioProcessor::startProgressionPlayback (const Progression& pro
   playbackActiveNotes.clear();
   playbackSamplePos = 0.0;
   playbackBeat.store(0.0, std::memory_order_relaxed);
+
+  // Sync to metronome: turn it on and reset beat position to 0
+  if (auto* param = apvts.getParameter("metronomeOn"))
+    param->setValueNotifyingHost(1.0f);
+  tempoEngine.resetBeatPosition();
+
   playbackActive.store(true, std::memory_order_relaxed);
 }
 
@@ -354,6 +360,9 @@ void AudioPluginAudioProcessor::stopProgressionPlayback() {
     playbackChordIndex = -1;
     playbackNotesLow.store(0, std::memory_order_relaxed);
     playbackNotesHigh.store(0, std::memory_order_relaxed);
+
+    if (auto* param = apvts.getParameter("metronomeOn"))
+      param->setValueNotifyingHost(0.0f);
   }
 }
 
