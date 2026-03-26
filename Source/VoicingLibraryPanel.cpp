@@ -513,12 +513,12 @@ void VoicingLibraryPanel::paintListBoxItem (int rowNumber, juce::Graphics& g,
         g.fillAll (juce::Colour (ChordyTheme::bgSurface));
 
     g.setColour (juce::Colour (ChordyTheme::textPrimary));
-    g.setFont (ChordyTheme::fontBody);
+    g.setFont (15.0f);
     g.drawText (v.name, 8, 0, width - 80, height, juce::Justification::centredLeft);
 
     // Show quality + alterations badge
     g.setColour (juce::Colour (ChordyTheme::textSecondary));
-    g.setFont (ChordyTheme::fontSmall);
+    g.setFont (12.0f);
     g.drawText (v.getQualityLabel(),
                 width - 70, 0, 62, height, juce::Justification::centredRight);
 }

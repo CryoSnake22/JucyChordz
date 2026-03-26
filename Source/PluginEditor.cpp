@@ -12,6 +12,7 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
       practicePanel(p, keyboard) {
 
   setLookAndFeel(&chordyLookAndFeel);
+  juce::LookAndFeel::setDefaultLookAndFeel(&chordyLookAndFeel);
 
   // Title
   titleLabel.setText("CHORDY", juce::dontSendNotification);
@@ -104,6 +105,7 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
 }
 
 AudioPluginAudioProcessorEditor::~AudioPluginAudioProcessorEditor() {
+  juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
   setLookAndFeel(nullptr);
   stopTimer();
 }
@@ -116,12 +118,10 @@ void AudioPluginAudioProcessorEditor::paint(juce::Graphics &g) {
   auto separatorColour = juce::Colour(ChordyTheme::border).withAlpha(0.5f);
   g.setColour(separatorColour);
 
-  int headerBottom = 40;
-  int chordBottom = headerBottom + 80;
+  int chordBottom = 40 + 80;
   int keyboardBottom = chordBottom + 140;
   int tempoBottom = keyboardBottom + 36;
 
-  g.drawHorizontalLine(headerBottom, 0.0f, (float)getWidth());
   g.drawHorizontalLine(chordBottom, 0.0f, (float)getWidth());
   g.drawHorizontalLine(keyboardBottom, 0.0f, (float)getWidth());
   g.drawHorizontalLine(tempoBottom, 0.0f, (float)getWidth());

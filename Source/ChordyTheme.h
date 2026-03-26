@@ -54,7 +54,7 @@ namespace ChordyTheme
     constexpr juce::uint32 qualityTimeout   = 0xFFDC2626;
 
     // --- Typography ---
-    constexpr const char* fontFamily  = "CMU Serif";
+    constexpr const char* fontFamily  = "Avenir Next";
     constexpr float fontTitle         = 22.0f;
     constexpr float fontChordDisplay  = 36.0f;
     constexpr float fontChordBig      = 48.0f;
