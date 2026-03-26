@@ -35,9 +35,25 @@ Progression ProgressionLibrary::transposeProgression (const Progression& p, int 
     {
         chord.rootPitchClass = (chord.rootPitchClass + semitones + 12) % 12;
 
-        // Shift MIDI notes
+        // Shift MIDI notes (preserves voice leading exactly)
         for (auto& note : chord.midiNotes)
             note += semitones;
+
+        // Rebuild display name from transposed root + quality
+        juce::String rootName = ChordDetector::noteNameFromPitchClass (chord.rootPitchClass);
+        juce::String qualLabel = ChordDetector::qualitySuffix (chord.quality);
+        if (chord.alterations.isNotEmpty())
+            qualLabel += chord.alterations;
+        chord.name = rootName + qualLabel;
+
+        // Add slash bass note if lowest note differs from root (inversion)
+        if (! chord.midiNotes.empty())
+        {
+            int bassPitchClass = chord.midiNotes[0] % 12;
+            if (bassPitchClass < 0) bassPitchClass += 12;
+            if (bassPitchClass != chord.rootPitchClass)
+                chord.name += "/" + ChordDetector::noteNameFromPitchClass (bassPitchClass);
+        }
     }
 
     return result;

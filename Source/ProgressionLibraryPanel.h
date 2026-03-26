@@ -47,6 +47,7 @@ private:
     ProgressionChartComponent chartPreview;
     juce::TextButton recordButton { "Record" };
     juce::TextButton playButton { "Play" };
+    juce::TextButton editButton { "Edit" };
     juce::TextButton deleteButton { "Delete" };
 
     // --- Count-in state ---
@@ -60,6 +61,9 @@ private:
     juce::TextButton quantHalfBtn { "1/2" };
     juce::TextButton quantQuarterBtn { "1/4" };
     juce::TextButton editPlayBtn { "Play" };
+    juce::TextButton transposeDownBtn { "-1" };
+    juce::TextButton transposeUpBtn { "+1" };
+    juce::Label transposeLabel;
     juce::Label editChordLabel;
     juce::TextEditor editChordNameEditor;
     juce::Label editRootLabel;
@@ -103,6 +107,8 @@ private:
     void onEditDone();
     void onConfirmSave();
     void onDelete();
+    void onEditExisting();
+    void onTranspose (int semitones);
     void onPlayToggle();
     void onEditPlayToggle();
     void playChordPreview (const ProgressionChord& chord);

@@ -25,7 +25,16 @@ struct ProgressionChord
         juce::String qualLabel = ChordDetector::qualitySuffix (quality);
         if (alterations.isNotEmpty())
             qualLabel += alterations;
-        return rootName + qualLabel;
+        juce::String result = rootName + qualLabel;
+        // Add slash bass if lowest note differs from root
+        if (! midiNotes.empty())
+        {
+            int bassPc = midiNotes[0] % 12;
+            if (bassPc < 0) bassPc += 12;
+            if (bassPc != rootPitchClass)
+                result += "/" + ChordDetector::noteNameFromPitchClass (bassPc);
+        }
+        return result;
     }
 };
 

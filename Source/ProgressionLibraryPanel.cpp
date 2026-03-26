@@ -114,6 +114,9 @@ ProgressionLibraryPanel::ProgressionLibraryPanel (AudioPluginAudioProcessor& pro
     playButton.onClick = [this] { onPlayToggle(); };
     addAndMakeVisible (playButton);
 
+    editButton.onClick = [this] { onEditExisting(); };
+    addAndMakeVisible (editButton);
+
     deleteButton.onClick = [this] { onDelete(); };
     addAndMakeVisible (deleteButton);
 
@@ -133,6 +136,17 @@ ProgressionLibraryPanel::ProgressionLibraryPanel (AudioPluginAudioProcessor& pro
 
     editPlayBtn.onClick = [this] { onEditPlayToggle(); };
     addChildComponent (editPlayBtn);
+
+    transposeLabel.setText ("Transpose:", juce::dontSendNotification);
+    transposeLabel.setFont (juce::FontOptions (ChordyTheme::fontSmall));
+    transposeLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::textSecondary));
+    addChildComponent (transposeLabel);
+
+    transposeDownBtn.onClick = [this] { onTranspose (-1); };
+    addChildComponent (transposeDownBtn);
+
+    transposeUpBtn.onClick = [this] { onTranspose (1); };
+    addChildComponent (transposeUpBtn);
 
     editChart.onChordSelected = [this](int idx) { onEditChordSelected (idx); };
     editChart.setEditMode (true);
@@ -286,11 +300,14 @@ void ProgressionLibraryPanel::layoutIdleMode (juce::Rectangle<int> area)
     area.removeFromTop (4);
 
     auto bottomRow = area.removeFromBottom (30);
-    deleteButton.setBounds (bottomRow.removeFromRight (55));
-    bottomRow.removeFromRight (4);
-    playButton.setBounds (bottomRow.removeFromRight (55));
-    bottomRow.removeFromRight (4);
-    recordButton.setBounds (bottomRow.removeFromRight (65));
+    int bw = (bottomRow.getWidth() - 12) / 4;
+    recordButton.setBounds (bottomRow.removeFromLeft (bw));
+    bottomRow.removeFromLeft (4);
+    playButton.setBounds (bottomRow.removeFromLeft (bw));
+    bottomRow.removeFromLeft (4);
+    editButton.setBounds (bottomRow.removeFromLeft (bw));
+    bottomRow.removeFromLeft (4);
+    deleteButton.setBounds (bottomRow);
     area.removeFromBottom (4);
 
     // Chart preview at bottom
@@ -316,6 +333,15 @@ void ProgressionLibraryPanel::layoutEditMode (juce::Rectangle<int> area)
     quantQuarterBtn.setBounds (quantRow.removeFromLeft (btnW));
     quantRow.removeFromLeft (4);
     editPlayBtn.setBounds (quantRow);
+    area.removeFromTop (4);
+
+    // Transpose row
+    auto transposeRow = area.removeFromTop (24);
+    transposeLabel.setBounds (transposeRow.removeFromLeft (70));
+    transposeRow.removeFromLeft (4);
+    transposeDownBtn.setBounds (transposeRow.removeFromLeft (36));
+    transposeRow.removeFromLeft (4);
+    transposeUpBtn.setBounds (transposeRow.removeFromLeft (36));
     area.removeFromTop (4);
 
     // Buttons at bottom
@@ -393,6 +419,7 @@ void ProgressionLibraryPanel::setIdleModeVisible (bool v)
     chartPreview.setVisible (v);
     recordButton.setVisible (v);
     playButton.setVisible (v);
+    editButton.setVisible (v);
     deleteButton.setVisible (v);
 }
 
@@ -404,6 +431,9 @@ void ProgressionLibraryPanel::setEditModeVisible (bool v)
     quantHalfBtn.setVisible (v);
     quantQuarterBtn.setVisible (v);
     editPlayBtn.setVisible (v);
+    transposeLabel.setVisible (v);
+    transposeDownBtn.setVisible (v);
+    transposeUpBtn.setVisible (v);
     editChordLabel.setVisible (v);
     editChordNameEditor.setVisible (v);
     editRootLabel.setVisible (v);
@@ -531,20 +561,26 @@ void ProgressionLibraryPanel::enterConfirming()
     setEditModeVisible (false);
     setConfirmModeVisible (true);
 
-    confirmNameEditor.setText ("Progression " +
-        juce::String (processorRef.progressionLibrary.size() + 1));
-
-    if (! pendingProgression.chords.empty())
-    {
-        int key = pendingProgression.chords[0].rootPitchClass;
-        confirmKeyCombo.setSelectedId (key + 1, juce::dontSendNotification);
-    }
+    // Pre-fill with existing values if editing, otherwise defaults
+    if (pendingProgression.name.isNotEmpty())
+        confirmNameEditor.setText (pendingProgression.name);
     else
-    {
-        confirmKeyCombo.setSelectedId (1, juce::dontSendNotification);
-    }
+        confirmNameEditor.setText ("Progression " +
+            juce::String (processorRef.progressionLibrary.size() + 1));
 
-    confirmModeCombo.setSelectedId (1, juce::dontSendNotification);
+    confirmKeyCombo.setSelectedId (pendingProgression.keyPitchClass + 1, juce::dontSendNotification);
+
+    // Match mode string to combo
+    int modeId = 1;
+    if (pendingProgression.mode == "Minor") modeId = 2;
+    else if (pendingProgression.mode == "Dorian") modeId = 3;
+    else if (pendingProgression.mode == "Mixolydian") modeId = 4;
+    else if (pendingProgression.mode == "Lydian") modeId = 5;
+    else if (pendingProgression.mode == "Phrygian") modeId = 6;
+    else if (pendingProgression.mode == "Locrian") modeId = 7;
+    else if (pendingProgression.mode == "Blues") modeId = 8;
+    else if (pendingProgression.mode == "Other") modeId = 9;
+    confirmModeCombo.setSelectedId (modeId, juce::dontSendNotification);
 
     resized();
     repaint();
@@ -780,6 +816,8 @@ void ProgressionLibraryPanel::onConfirmSave()
         default: pendingProgression.mode = "Major"; break;
     }
 
+    // Remove old version if editing an existing progression (same ID)
+    processorRef.progressionLibrary.removeProgression (pendingProgression.id);
     processorRef.progressionLibrary.addProgression (pendingProgression);
     enterIdle();
 }
@@ -794,6 +832,29 @@ void ProgressionLibraryPanel::onDelete()
         chartPreview.setProgressionReadOnly (nullptr);
         repaint();
     }
+}
+
+void ProgressionLibraryPanel::onEditExisting()
+{
+    auto id = getSelectedProgressionId();
+    const auto* prog = processorRef.progressionLibrary.getProgression (id);
+    if (prog == nullptr)
+        return;
+
+    // Copy into pending for editing
+    pendingProgression = *prog;
+    currentQuantizeResolution = 1.0;
+    enterEditing();
+}
+
+void ProgressionLibraryPanel::onTranspose (int semitones)
+{
+    processorRef.stopProgressionPlayback();
+    pendingProgression = ProgressionLibrary::transposeProgression (pendingProgression, semitones);
+
+    editChart.setSelectedChord (-1);
+    editChart.setProgression (&pendingProgression);
+    editChart.repaint();
 }
 
 void ProgressionLibraryPanel::onPlayToggle()

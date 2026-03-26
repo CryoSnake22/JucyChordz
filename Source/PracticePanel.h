@@ -46,8 +46,8 @@ public:
     juce::String getNextRootText() const { return nextRootText; }
 
     // Called by editor when user selects a voicing/progression in the library
-    void setSelectedVoicingId (const juce::String& id) { selectedVoicingId = id; practiceType = PracticeType::Voicing; }
-    void setSelectedProgressionId (const juce::String& id) { selectedProgressionId = id; practiceType = PracticeType::Progression; }
+    void setSelectedVoicingId (const juce::String& id);
+    void setSelectedProgressionId (const juce::String& id);
 
 private:
     juce::String selectedVoicingId;

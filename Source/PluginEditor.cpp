@@ -40,8 +40,9 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
 
   // Voicing library panel
   voicingLibraryPanel.onSelectionChanged = [this](const juce::String &voicingId) {
-    // Always track the selection so Start uses the right voicing
-    practicePanel.setSelectedVoicingId(voicingId);
+    // Only switch practice type to voicing if the voicings tab is active
+    if (libraryTabs.getCurrentTabIndex() == 0)
+      practicePanel.setSelectedVoicingId(voicingId);
 
     if (voicingId.isNotEmpty() && practicePanel.isPracticing()) {
       // Switch to practicing the newly selected voicing
@@ -77,7 +78,7 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
 
   // Progression selection → practice panel
   progressionLibraryPanel.onSelectionChanged = [this](const juce::String& progressionId) {
-    if (progressionId.isNotEmpty())
+    if (progressionId.isNotEmpty() && libraryTabs.getCurrentTabIndex() == 1)
       practicePanel.setSelectedProgressionId(progressionId);
   };
 
@@ -281,6 +282,31 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
       processorRef.tempoEngine.getBeatPhase(),
       processorRef.tempoEngine.getEffectiveBpm());
   beatIndicator.repaint();
+
+  // Detect tab changes — deselect previous tab's selection
+  int currentTab = libraryTabs.getCurrentTabIndex();
+  if (currentTab != lastTabIndex) {
+    lastTabIndex = currentTab;
+    stopVoicingPreview();
+    keyboard.clearAllColours();
+    keyboard.repaint();
+
+    if (currentTab == 0) {
+      // Switched to Voicings — update practice panel from voicing selection
+      auto vid = voicingLibraryPanel.getSelectedVoicingId();
+      if (vid.isNotEmpty())
+        practicePanel.setSelectedVoicingId(vid);
+      else
+        practicePanel.setSelectedVoicingId({});
+    } else if (currentTab == 1) {
+      // Switched to Progressions — update practice panel from progression selection
+      auto pid = progressionLibraryPanel.getSelectedProgressionId();
+      if (pid.isNotEmpty())
+        practicePanel.setSelectedProgressionId(pid);
+      else
+        practicePanel.setSelectedProgressionId({});
+    }
+  }
 
   // Disable BPM slider when syncing to host
   bpmSlider.setEnabled(! hostSyncToggle.getToggleState());

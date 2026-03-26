@@ -63,6 +63,9 @@ private:
   std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> synthToggleAttachment;
   std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> synthVolumeAttachment;
 
+  // Tab tracking — deselect when switching tabs
+  int lastTabIndex = 0;
+
   // Voicing preview playback
   std::vector<int> previewNotes;
   int previewFramesRemaining = 0;

@@ -160,6 +160,44 @@ void PracticePanel::resized()
     statsLabel.setBounds (area.removeFromTop (24));
 }
 
+// --- Selection ---
+
+void PracticePanel::setSelectedVoicingId (const juce::String& id)
+{
+    selectedVoicingId = id;
+    selectedProgressionId = {};
+    practiceType = PracticeType::Voicing;
+
+    if (! practicing)
+    {
+        const auto* v = processorRef.voicingLibrary.getVoicing (id);
+        if (v != nullptr)
+            headerLabel.setText ("Practice: " + v->name, juce::dontSendNotification);
+        else
+            headerLabel.setText ("PRACTICE — Voicings", juce::dontSendNotification);
+
+        targetLabel.setText ("Select a voicing and press Start", juce::dontSendNotification);
+    }
+}
+
+void PracticePanel::setSelectedProgressionId (const juce::String& id)
+{
+    selectedProgressionId = id;
+    selectedVoicingId = {};
+    practiceType = PracticeType::Progression;
+
+    if (! practicing)
+    {
+        const auto* p = processorRef.progressionLibrary.getProgression (id);
+        if (p != nullptr)
+            headerLabel.setText ("Practice: " + p->name, juce::dontSendNotification);
+        else
+            headerLabel.setText ("PRACTICE — Progressions", juce::dontSendNotification);
+
+        targetLabel.setText ("Select a progression and press Start", juce::dontSendNotification);
+    }
+}
+
 // --- Start / Stop ---
 
 void PracticePanel::onStartStop()
@@ -330,7 +368,7 @@ void PracticePanel::stopPractice()
     practiceChart.setProgressionReadOnly (nullptr);
 
     headerLabel.setText ("PRACTICE", juce::dontSendNotification);
-    targetLabel.setText ("Select a voicing or progression", juce::dontSendNotification);
+    targetLabel.setText ("Select a voicing or progression and press Start", juce::dontSendNotification);
     targetLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::textPrimary));
     feedbackLabel.setText ("", juce::dontSendNotification);
     currentRootText = {};
