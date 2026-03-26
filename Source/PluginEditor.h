@@ -8,6 +8,7 @@
 #include "BeatIndicatorComponent.h"
 #include "PlaceholderPanel.h"
 #include "ProgressionLibraryPanel.h"
+#include "MelodyLibraryPanel.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -43,7 +44,7 @@ private:
   juce::TabbedComponent libraryTabs { juce::TabbedButtonBar::TabsAtTop };
   VoicingLibraryPanel voicingLibraryPanel;
   ProgressionLibraryPanel progressionLibraryPanel;
-  PlaceholderPanel melodiesPanel { "Melodies — coming soon" };
+  MelodyLibraryPanel melodyLibraryPanel;
   PracticePanel practicePanel;
 
   // Tempo bar

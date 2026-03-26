@@ -71,6 +71,14 @@ namespace ChordyTheme
     constexpr juce::uint32 chartCursor        = 0xAAE8A634;
     constexpr juce::uint32 chartPassingChord  = 0xFF252525;
 
+    // --- Melody chart ---
+    constexpr juce::uint32 melodyNoteBg        = 0xFF2D5A3D;
+    constexpr juce::uint32 melodyNoteActive    = 0xFF6EE7A0;
+    constexpr juce::uint32 melodyNoteCorrect   = 0xFF4ADE80;
+    constexpr juce::uint32 melodyNoteMissed    = 0xFFEF4444;
+    constexpr juce::uint32 melodyChordBg       = 0xFF2A2A3A;
+    constexpr juce::uint32 melodyChordActive   = 0x664ADE80;
+
     // --- Spacing ---
     constexpr int panelPadding        = 12;
     constexpr int sectionGap          = 10;

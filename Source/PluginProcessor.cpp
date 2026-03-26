@@ -246,6 +246,72 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
     }
   }
 
+  // Melody playback — inject individual note MIDI events based on beat position
+  if (melodyPlaybackActive.load(std::memory_order_relaxed)) {
+    double bpm = *apvts.getRawParameterValue("bpm");
+    double samplesPerBeat = getSampleRate() * 60.0 / bpm;
+    int midiCh = channel;
+
+    for (int s = 0; s < buffer.getNumSamples(); ++s) {
+      double beat = melodyPlaybackSamplePos / samplesPerBeat;
+      melodyPlaybackBeat.store(beat, std::memory_order_relaxed);
+
+      // End of melody
+      if (beat >= melodyPlaybackData.totalBeats) {
+        if (melodyPlaybackActiveNote >= 0) {
+          midiMessages.addEvent(juce::MidiMessage::noteOff(midiCh, melodyPlaybackActiveNote), s);
+          melodyPlaybackActiveNote = -1;
+        }
+        melodyPlaybackActive.store(false, std::memory_order_relaxed);
+        playbackNotesLow.store(0, std::memory_order_relaxed);
+        playbackNotesHigh.store(0, std::memory_order_relaxed);
+        break;
+      }
+
+      // Find which note should be active at this beat
+      int targetNote = -1;
+      for (int ni = 0; ni < static_cast<int>(melodyPlaybackData.notes.size()); ++ni) {
+        const auto& n = melodyPlaybackData.notes[static_cast<size_t>(ni)];
+        if (beat >= n.startBeat && beat < n.startBeat + n.durationBeats) {
+          targetNote = ni;
+          break;
+        }
+      }
+
+      if (targetNote != melodyPlaybackNoteIndex) {
+        // Note off for previous note
+        if (melodyPlaybackActiveNote >= 0) {
+          midiMessages.addEvent(juce::MidiMessage::noteOff(midiCh, melodyPlaybackActiveNote), s);
+          melodyPlaybackActiveNote = -1;
+        }
+
+        melodyPlaybackNoteIndex = targetNote;
+
+        // Note on for new note
+        if (targetNote >= 0) {
+          const auto& n = melodyPlaybackData.notes[static_cast<size_t>(targetNote)];
+          int midiNote = melodyPlaybackKeyRoot + n.intervalFromKeyRoot;
+          if (midiNote >= 0 && midiNote < 128) {
+            float vel = static_cast<float>(n.velocity) / 127.0f;
+            midiMessages.addEvent(juce::MidiMessage::noteOn(midiCh, midiNote, vel), s);
+            melodyPlaybackActiveNote = midiNote;
+          }
+        }
+
+        // Update keyboard highlighting
+        uint64_t pLow = 0, pHigh = 0;
+        if (melodyPlaybackActiveNote >= 0) {
+          if (melodyPlaybackActiveNote < 64) pLow |= (uint64_t(1) << melodyPlaybackActiveNote);
+          else pHigh |= (uint64_t(1) << (melodyPlaybackActiveNote - 64));
+        }
+        playbackNotesLow.store(pLow, std::memory_order_relaxed);
+        playbackNotesHigh.store(pHigh, std::memory_order_relaxed);
+      }
+
+      melodyPlaybackSamplePos += 1.0;
+    }
+  }
+
   // Merge preview MIDI (voicing preview from GUI thread)
   {
     juce::SpinLock::ScopedLockType lock(previewMidiLock);
@@ -303,9 +369,11 @@ void AudioPluginAudioProcessor::getStateInformation(
   state.removeChild(state.getChildWithName("VoicingLibrary"), nullptr);
   state.removeChild(state.getChildWithName("SpacedRepetition"), nullptr);
   state.removeChild(state.getChildWithName("ProgressionLibrary"), nullptr);
+  state.removeChild(state.getChildWithName("MelodyLibrary"), nullptr);
   state.appendChild(voicingLibrary.toValueTree(), nullptr);
   state.appendChild(spacedRepetition.toValueTree(), nullptr);
   state.appendChild(progressionLibrary.toValueTree(), nullptr);
+  state.appendChild(melodyLibrary.toValueTree(), nullptr);
 
   std::unique_ptr<juce::XmlElement> xml(state.createXml());
   copyXmlToBinary(*xml, destData);
@@ -329,6 +397,10 @@ void AudioPluginAudioProcessor::setStateInformation(const void *data,
     auto plTree = state.getChildWithName("ProgressionLibrary");
     if (plTree.isValid())
       progressionLibrary.fromValueTree(plTree);
+
+    auto mlTree = state.getChildWithName("MelodyLibrary");
+    if (mlTree.isValid())
+      melodyLibrary.fromValueTree(mlTree);
 
     apvts.replaceState(state);
   }
@@ -363,6 +435,30 @@ void AudioPluginAudioProcessor::stopProgressionPlayback() {
 
     if (auto* param = apvts.getParameter("metronomeOn"))
       param->setValueNotifyingHost(0.0f);
+  }
+}
+
+void AudioPluginAudioProcessor::startMelodyPlayback (const Melody& melody, int keyRootMidiNote) {
+  stopMelodyPlayback();
+  melodyPlaybackData = melody;
+  melodyPlaybackKeyRoot = keyRootMidiNote;
+  melodyPlaybackNoteIndex = -1;
+  melodyPlaybackActiveNote = -1;
+  melodyPlaybackSamplePos = 0.0;
+  melodyPlaybackBeat.store(0.0, std::memory_order_relaxed);
+  melodyPlaybackActive.store(true, std::memory_order_relaxed);
+}
+
+void AudioPluginAudioProcessor::stopMelodyPlayback() {
+  if (melodyPlaybackActive.load(std::memory_order_relaxed)) {
+    melodyPlaybackActive.store(false, std::memory_order_relaxed);
+    int ch = static_cast<int>(*apvts.getRawParameterValue("midiChannel"));
+    if (melodyPlaybackActiveNote >= 0)
+      addPreviewMidi(juce::MidiMessage::noteOff(ch, melodyPlaybackActiveNote));
+    melodyPlaybackActiveNote = -1;
+    melodyPlaybackNoteIndex = -1;
+    playbackNotesLow.store(0, std::memory_order_relaxed);
+    playbackNotesHigh.store(0, std::memory_order_relaxed);
   }
 }
 

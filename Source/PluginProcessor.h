@@ -7,6 +7,7 @@
 #include "ChordySynth.h"
 #include "ProgressionModel.h"
 #include "ProgressionRecorder.h"
+#include "MelodyModel.h"
 #include <atomic>
 #include <mutex>
 
@@ -80,6 +81,9 @@ public:
   ProgressionLibrary progressionLibrary;
   ProgressionRecorder progressionRecorder;
 
+  // Melody library
+  MelodyLibrary melodyLibrary;
+
   // Preview MIDI injection — GUI thread pushes, audio thread drains into synth
   void addPreviewMidi (const juce::MidiMessage& msg);
 
@@ -88,6 +92,12 @@ public:
   void stopProgressionPlayback();
   bool isPlayingProgression() const { return playbackActive.load (std::memory_order_relaxed); }
   double getPlaybackBeatPosition() const { return playbackBeat.load (std::memory_order_relaxed); }
+
+  // Melody playback — GUI thread starts/stops, audio thread drives
+  void startMelodyPlayback (const Melody& melody, int keyRootMidiNote);
+  void stopMelodyPlayback();
+  bool isPlayingMelody() const { return melodyPlaybackActive.load (std::memory_order_relaxed); }
+  double getMelodyPlaybackBeat() const { return melodyPlaybackBeat.load (std::memory_order_relaxed); }
 
   // Lock-free playback note bitfield for keyboard highlighting
   std::atomic<uint64_t> playbackNotesLow { 0 };
@@ -105,6 +115,15 @@ private:
   juce::MidiBuffer previewMidiBuffer;
   mutable std::mutex lastPlayedNotesMutex;
   std::vector<int> lastPlayedNotes;
+
+  // Melody playback state
+  std::atomic<bool> melodyPlaybackActive { false };
+  std::atomic<double> melodyPlaybackBeat { 0.0 };
+  Melody melodyPlaybackData;
+  int melodyPlaybackKeyRoot = 60;
+  int melodyPlaybackNoteIndex = -1;
+  int melodyPlaybackActiveNote = -1;
+  double melodyPlaybackSamplePos = 0.0;
 
   static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 

@@ -6,6 +6,8 @@
 #include "ChordDetector.h"
 #include "ProgressionModel.h"
 #include "ProgressionChartComponent.h"
+#include "MelodyModel.h"
+#include "MelodyChartComponent.h"
 #include <set>
 #include <random>
 
@@ -13,7 +15,7 @@ class AudioPluginAudioProcessor;
 class ChordyKeyboardComponent;
 
 enum class RootOrder { Chromatic, Random };
-enum class PracticeType { Voicing, Progression };
+enum class PracticeType { Voicing, Progression, Melody };
 
 class PracticePanel : public juce::Component
 {
@@ -45,13 +47,15 @@ public:
     juce::Colour getCurrentRootColour() const { return currentRootColour; }
     juce::String getNextRootText() const { return nextRootText; }
 
-    // Called by editor when user selects a voicing/progression in the library
+    // Called by editor when user selects a voicing/progression/melody in the library
     void setSelectedVoicingId (const juce::String& id);
     void setSelectedProgressionId (const juce::String& id);
+    void setSelectedMelodyId (const juce::String& id);
 
 private:
     juce::String selectedVoicingId;
     juce::String selectedProgressionId;
+    juce::String selectedMelodyId;
     PracticeType practiceType = PracticeType::Voicing;
 
     // Main chord display state
@@ -116,6 +120,20 @@ private:
     int progressionChordsTotal = 0;               // total chords in progression
     int progressionQualitySum = 0;                // sum of all chord qualities (for avg)
 
+    // --- Melody practice state ---
+    juce::String practicingMelodyId;
+    Melody transposedMelody;
+    int melodyNoteIndex = 0;
+    int melodyNotesCorrect = 0;
+    int melodyNotesTotal = 0;
+    int melodyKeyOffset = 0;
+    int melodyKeyRootMidi = 60;
+    std::set<int> previousFramePitchClasses;
+    MelodyChartComponent practiceMLChart;
+    juce::ToggleButton backingToggle { "Backing" };
+    std::vector<int> backingChordNotes;
+    int currentBackingChordIndex = -1;
+
     static int computeQuality (double beatsElapsed, bool hadWrongAttempt);
 
     void onStartStop();
@@ -136,4 +154,12 @@ private:
 
     void loadProgressionChallenge (int keyIndex);
     void advanceProgressionChord();
+
+    // Melody practice methods
+    void startMelodyPractice (const juce::String& melodyId);
+    void loadMelodyChallenge (int keyIndex);
+    void advanceMelodyNote();
+    void updateMelodyPractice (const std::vector<int>& activeNotes);
+    void updateMelodyBacking();
+    void stopMelodyBacking();
 };

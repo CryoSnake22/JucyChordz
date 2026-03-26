@@ -98,6 +98,17 @@ juce::String ChordDetector::qualitySuffix (ChordQuality q)
     return "?";
 }
 
+std::vector<int> ChordDetector::getChordTones (ChordQuality q)
+{
+    const auto& templates = getTemplates();
+    for (const auto& tmpl : templates)
+        if (tmpl.quality == q)
+            return std::vector<int> (tmpl.intervals.begin(), tmpl.intervals.end());
+
+    // Unknown or no template found — return just the root
+    return { 0 };
+}
+
 ChordResult ChordDetector::detect (const std::vector<int>& midiNotes)
 {
     ChordResult result;

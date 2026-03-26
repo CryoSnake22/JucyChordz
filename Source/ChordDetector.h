@@ -59,6 +59,9 @@ public:
     static juce::String noteNameFromPitchClass (int pitchClass);
     static juce::String qualitySuffix (ChordQuality q);
 
+    // Returns the interval template for a chord quality (e.g., Dom7 -> {0,4,7,10})
+    static std::vector<int> getChordTones (ChordQuality q);
+
 private:
     struct ChordTemplate
     {

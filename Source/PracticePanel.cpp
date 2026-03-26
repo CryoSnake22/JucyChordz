@@ -83,6 +83,12 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
     practiceChart.setVisible (false);
     addAndMakeVisible (practiceChart);
 
+    practiceMLChart.setVisible (false);
+    addAndMakeVisible (practiceMLChart);
+
+    backingToggle.setToggleState (true, juce::dontSendNotification);
+    addAndMakeVisible (backingToggle);
+
     updateStats();
 }
 
@@ -99,16 +105,23 @@ void PracticePanel::resized()
     headerLabel.setBounds (area.removeFromTop (24));
     area.removeFromTop (4);
 
-    // Show chart for progression practice, target label for voicing practice
+    // Show chart for progression/melody practice, target label for voicing practice
     if (practicing && practiceType == PracticeType::Progression)
     {
         practiceChart.setBounds (area.removeFromTop (70));
         area.removeFromTop (4);
         targetLabel.setBounds (area.removeFromTop (24));
     }
+    else if (practicing && practiceType == PracticeType::Melody)
+    {
+        practiceMLChart.setBounds (area.removeFromTop (100));
+        area.removeFromTop (4);
+        targetLabel.setBounds (area.removeFromTop (24));
+    }
     else
     {
         practiceChart.setBounds (0, 0, 0, 0); // hidden
+        practiceMLChart.setBounds (0, 0, 0, 0);
         targetLabel.setBounds (area.removeFromTop (36));
     }
     area.removeFromTop (4);
@@ -124,7 +137,9 @@ void PracticePanel::resized()
     customButton.setBounds (buttonRow);
 
     area.removeFromTop (4);
-    timedToggle.setBounds (area.removeFromTop (24));
+    auto toggleRow = area.removeFromTop (24);
+    timedToggle.setBounds (toggleRow.removeFromLeft (toggleRow.getWidth() / 2));
+    backingToggle.setBounds (toggleRow);
 
     // Key selector (conditionally visible)
     if (showingKeySelector)
@@ -198,6 +213,25 @@ void PracticePanel::setSelectedProgressionId (const juce::String& id)
     }
 }
 
+void PracticePanel::setSelectedMelodyId (const juce::String& id)
+{
+    selectedMelodyId = id;
+    selectedVoicingId = {};
+    selectedProgressionId = {};
+    practiceType = PracticeType::Melody;
+
+    if (! practicing)
+    {
+        const auto* m = processorRef.melodyLibrary.getMelody (id);
+        if (m != nullptr)
+            headerLabel.setText ("Practice: " + m->name, juce::dontSendNotification);
+        else
+            headerLabel.setText ("PRACTICE — Melodies", juce::dontSendNotification);
+
+        targetLabel.setText ("Select a melody and press Start", juce::dontSendNotification);
+    }
+}
+
 // --- Start / Stop ---
 
 void PracticePanel::onStartStop()
@@ -208,7 +242,33 @@ void PracticePanel::onStartStop()
         return;
     }
 
-    // Check if we should practice a progression or a voicing
+    // Check if we should practice a melody, progression, or voicing
+    if (practiceType == PracticeType::Melody && selectedMelodyId.isNotEmpty())
+    {
+        const auto* mel = processorRef.melodyLibrary.getMelody (selectedMelodyId);
+        if (mel == nullptr || mel->notes.empty())
+        {
+            targetLabel.setText ("Select a valid melody!", juce::dontSendNotification);
+            return;
+        }
+
+        if (customMode)
+        {
+            bool anySelected = false;
+            for (int i = 0; i < 12; ++i)
+                if (keyToggles[i].getToggleState())
+                    anySelected = true;
+            if (! anySelected)
+            {
+                targetLabel.setText ("Select at least one key!", juce::dontSendNotification);
+                return;
+            }
+        }
+
+        startMelodyPractice (selectedMelodyId);
+        return;
+    }
+
     if (practiceType == PracticeType::Progression && selectedProgressionId.isNotEmpty())
     {
         const auto* prog = processorRef.progressionLibrary.getProgression (selectedProgressionId);
@@ -363,12 +423,18 @@ void PracticePanel::stopPractice()
     targetNotes.clear();
     practicingVoicingId = {};
     practicingProgressionId = {};
+    practicingMelodyId = {};
     progressionChordIndex = 0;
     practiceChart.setVisible (false);
     practiceChart.setProgressionReadOnly (nullptr);
+    practiceMLChart.setVisible (false);
+    practiceMLChart.setMelodyReadOnly (nullptr);
+    stopMelodyBacking();
+    processorRef.stopMelodyPlayback();
+    previousFramePitchClasses.clear();
 
     headerLabel.setText ("PRACTICE", juce::dontSendNotification);
-    targetLabel.setText ("Select a voicing or progression and press Start", juce::dontSendNotification);
+    targetLabel.setText ("Select a voicing, progression, or melody and press Start", juce::dontSendNotification);
     targetLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::textPrimary));
     feedbackLabel.setText ("", juce::dontSendNotification);
     currentRootText = {};
@@ -396,7 +462,16 @@ void PracticePanel::stopPractice()
 
 void PracticePanel::updatePractice (const std::vector<int>& activeNotes)
 {
-    if (! practicing || targetNotes.empty())
+    if (! practicing)
+        return;
+
+    if (practiceType == PracticeType::Melody)
+    {
+        updateMelodyPractice (activeNotes);
+        return;
+    }
+
+    if (targetNotes.empty())
         return;
 
     if (practiceType == PracticeType::Progression)
@@ -802,6 +877,34 @@ void PracticePanel::onNext()
     if (! practicing)
         return;
 
+    // --- Melody practice ---
+    if (practiceType == PracticeType::Melody)
+    {
+        if (melodyNoteIndex < static_cast<int> (transposedMelody.notes.size()))
+        {
+            practiceMLChart.setNoteState (melodyNoteIndex, MelodyChartComponent::NoteState::Missed);
+            melodyNoteIndex++;
+            feedbackLabel.setText ("Skipped", juce::dontSendNotification);
+            feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::danger));
+
+            if (melodyNoteIndex >= static_cast<int> (transposedMelody.notes.size()))
+                advanceMelodyNote(); // triggers key completion
+            else
+            {
+                practiceMLChart.setNoteState (melodyNoteIndex, MelodyChartComponent::NoteState::Target);
+                practiceMLChart.setHighlightedNoteIndex (melodyNoteIndex);
+
+                int pc = (melodyKeyRootMidi + transposedMelody.notes[static_cast<size_t> (melodyNoteIndex)].intervalFromKeyRoot) % 12;
+                if (pc < 0) pc += 12;
+                juce::String noteName = ChordDetector::noteNameFromPitchClass (pc);
+                targetLabel.setText ("Play: " + noteName, juce::dontSendNotification);
+
+                updateMelodyBacking();
+            }
+        }
+        return;
+    }
+
     // --- Progression practice ---
     if (practiceType == PracticeType::Progression)
     {
@@ -923,6 +1026,16 @@ PracticeChallenge PracticePanel::getNextCustomChallenge()
 
 void PracticePanel::onPlay()
 {
+    // --- Melody practice: play the whole melody ---
+    if (practiceType == PracticeType::Melody && transposedMelody.isValid())
+    {
+        if (processorRef.isPlayingMelody())
+            processorRef.stopMelodyPlayback();
+        else
+            processorRef.startMelodyPlayback (transposedMelody, melodyKeyRootMidi);
+        return;
+    }
+
     if (targetNotes.empty())
         return;
 
@@ -1346,4 +1459,357 @@ void PracticePanel::updateProgressionPractice (const std::vector<int>& activeNot
         feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
         currentRootColour = juce::Colour (ChordyTheme::successBright);
     }
+}
+
+//==============================================================================
+// Melody practice
+//==============================================================================
+
+void PracticePanel::startMelodyPractice (const juce::String& melodyId)
+{
+    const auto* mel = processorRef.melodyLibrary.getMelody (melodyId);
+    if (mel == nullptr || mel->notes.empty())
+    {
+        targetLabel.setText ("Invalid melody!", juce::dontSendNotification);
+        return;
+    }
+
+    practicing = true;
+    practiceType = PracticeType::Melody;
+    practicingMelodyId = melodyId;
+    challengeCompleted = false;
+    timedPhase = TimedPhase::Inactive;
+    previousFramePitchClasses.clear();
+
+    startButton.setButtonText ("Stop");
+    startButton.setColour (juce::TextButton::buttonColourId, juce::Colour (ChordyTheme::dangerMuted));
+    nextButton.setEnabled (true);
+    playButton.setEnabled (true);
+
+    headerLabel.setText ("Practicing: " + mel->name, juce::dontSendNotification);
+
+    // Get the first key to practice
+    int keyIndex;
+    if (customMode)
+    {
+        buildCustomKeySequence();
+        keyIndex = getNextCustomChallenge().keyIndex;
+    }
+    else
+    {
+        keyIndex = processorRef.spacedRepetition.getNextChallenge (melodyId).keyIndex;
+    }
+
+    loadMelodyChallenge (keyIndex);
+}
+
+void PracticePanel::loadMelodyChallenge (int keyIndex)
+{
+    const auto* mel = processorRef.melodyLibrary.getMelody (practicingMelodyId);
+    if (mel == nullptr)
+    {
+        stopPractice();
+        return;
+    }
+
+    // Transpose to the target key
+    int offset = (keyIndex - mel->keyPitchClass + 12) % 12;
+    melodyKeyOffset = offset;
+    transposedMelody = MelodyLibrary::transposeMelody (*mel, offset);
+    melodyKeyRootMidi = 60 + transposedMelody.keyPitchClass;
+    melodyNoteIndex = 0;
+    melodyNotesCorrect = 0;
+    melodyNotesTotal = static_cast<int> (transposedMelody.notes.size());
+    previousFramePitchClasses.clear();
+    currentBackingChordIndex = -1;
+
+    // Set up chart
+    practiceMLChart.setVisible (true);
+    practiceMLChart.setMelodyReadOnly (&transposedMelody);
+    practiceMLChart.clearNoteStates();
+    practiceMLChart.setNoteState (0, MelodyChartComponent::NoteState::Target);
+    practiceMLChart.setHighlightedNoteIndex (0);
+
+    // Show target
+    juce::String keyName = ChordDetector::noteNameFromPitchClass (keyIndex);
+    const auto& firstNote = transposedMelody.notes[0];
+    int firstNotePC = (melodyKeyRootMidi + firstNote.intervalFromKeyRoot) % 12;
+    if (firstNotePC < 0) firstNotePC += 12;
+    juce::String noteName = ChordDetector::noteNameFromPitchClass (firstNotePC);
+
+    targetLabel.setText ("Key: " + keyName + "  —  Play: " + noteName, juce::dontSendNotification);
+    targetLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::textPrimary));
+    feedbackLabel.setText ("", juce::dontSendNotification);
+    timingFeedbackLabel.setText ("", juce::dontSendNotification);
+
+    currentRootText = keyName;
+    currentRootColour = juce::Colour (ChordyTheme::textTertiary);
+    nextRootText = "";
+
+    // Show first target note on keyboard
+    int targetMidi = melodyKeyRootMidi + firstNote.intervalFromKeyRoot;
+    keyboardRef.clearAllColours();
+    if (targetMidi >= 0 && targetMidi < 128)
+        keyboardRef.setKeyColour (targetMidi, KeyColour::Target);
+    keyboardRef.repaint();
+
+    // Start backing chord if enabled
+    updateMelodyBacking();
+
+    resized();
+    repaint();
+}
+
+void PracticePanel::advanceMelodyNote()
+{
+    if (melodyNoteIndex >= static_cast<int> (transposedMelody.notes.size()))
+    {
+        // Completed the melody in this key
+        int quality = 0;
+        if (melodyNotesTotal > 0)
+        {
+            double ratio = static_cast<double> (melodyNotesCorrect) / melodyNotesTotal;
+            if (ratio >= 0.95) quality = 5;
+            else if (ratio >= 0.8) quality = 4;
+            else if (ratio >= 0.6) quality = 3;
+            else if (ratio >= 0.4) quality = 2;
+            else if (ratio > 0.0) quality = 1;
+        }
+
+        int keyIndex = transposedMelody.keyPitchClass;
+        processorRef.spacedRepetition.recordAttempt (practicingMelodyId, keyIndex, quality);
+        updateStats();
+
+        juce::String scoreText = juce::String (melodyNotesCorrect) + "/"
+                                 + juce::String (melodyNotesTotal);
+        feedbackLabel.setText ("Complete! " + scoreText + " correct", juce::dontSendNotification);
+        feedbackLabel.setColour (juce::Label::textColourId,
+            quality >= 3 ? juce::Colour (ChordyTheme::success) : juce::Colour (ChordyTheme::danger));
+
+        stopMelodyBacking();
+
+        // Get next key
+        int nextKey;
+        if (customMode)
+            nextKey = getNextCustomChallenge().keyIndex;
+        else
+            nextKey = processorRef.spacedRepetition.getNextChallenge (practicingMelodyId).keyIndex;
+
+        loadMelodyChallenge (nextKey);
+        return;
+    }
+
+    // Show next target note
+    practiceMLChart.setNoteState (melodyNoteIndex, MelodyChartComponent::NoteState::Target);
+    practiceMLChart.setHighlightedNoteIndex (melodyNoteIndex);
+
+    const auto& note = transposedMelody.notes[static_cast<size_t> (melodyNoteIndex)];
+    int notePC = (melodyKeyRootMidi + note.intervalFromKeyRoot) % 12;
+    if (notePC < 0) notePC += 12;
+    juce::String noteName = ChordDetector::noteNameFromPitchClass (notePC);
+
+    juce::String keyName = ChordDetector::noteNameFromPitchClass (transposedMelody.keyPitchClass);
+    targetLabel.setText ("Key: " + keyName + "  —  Play: " + noteName, juce::dontSendNotification);
+    feedbackLabel.setText ("", juce::dontSendNotification);
+
+    // Show target on keyboard
+    int targetMidi = melodyKeyRootMidi + note.intervalFromKeyRoot;
+    keyboardRef.clearAllColours();
+    if (targetMidi >= 0 && targetMidi < 128)
+        keyboardRef.setKeyColour (targetMidi, KeyColour::Target);
+    keyboardRef.repaint();
+
+    // Update backing chord if needed
+    updateMelodyBacking();
+}
+
+void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
+{
+    if (melodyNoteIndex >= static_cast<int> (transposedMelody.notes.size()))
+        return;
+
+    // Step 1: Compute current pitch classes
+    std::set<int> currentPCs;
+    for (int n : activeNotes)
+    {
+        int pc = n % 12;
+        if (pc < 0) pc += 12;
+        currentPCs.insert (pc);
+    }
+
+    // Step 2: Find NEW note-ons (pitch classes not in previous frame)
+    std::set<int> newNoteOns;
+    for (int pc : currentPCs)
+        if (previousFramePitchClasses.count (pc) == 0)
+            newNoteOns.insert (pc);
+
+    previousFramePitchClasses = currentPCs;
+
+    // Step 3: No new notes — update keyboard colours and return
+    if (newNoteOns.empty())
+    {
+        if (! activeNotes.empty())
+        {
+            // Colour held notes
+            const auto& target = transposedMelody.notes[static_cast<size_t> (melodyNoteIndex)];
+            int targetPC = (melodyKeyRootMidi + target.intervalFromKeyRoot) % 12;
+            if (targetPC < 0) targetPC += 12;
+            int targetMidi = melodyKeyRootMidi + target.intervalFromKeyRoot;
+
+            keyboardRef.clearAllColours();
+            if (targetMidi >= 0 && targetMidi < 128)
+                keyboardRef.setKeyColour (targetMidi, KeyColour::Target);
+            for (int n : activeNotes)
+            {
+                int pc = n % 12;
+                if (pc < 0) pc += 12;
+                if (pc == targetPC)
+                    keyboardRef.setKeyColour (n, KeyColour::Correct);
+                else
+                    keyboardRef.setKeyColour (n, KeyColour::Wrong);
+            }
+            keyboardRef.repaint();
+        }
+        return;
+    }
+
+    // Step 4: Check new notes against target
+    const auto& target = transposedMelody.notes[static_cast<size_t> (melodyNoteIndex)];
+    int targetPC = (melodyKeyRootMidi + target.intervalFromKeyRoot) % 12;
+    if (targetPC < 0) targetPC += 12;
+
+    bool gotCorrect = false;
+    bool gotWrong = false;
+
+    for (int pc : newNoteOns)
+    {
+        if (pc == targetPC)
+            gotCorrect = true;
+        else
+            gotWrong = true;
+    }
+
+    // Step 5: Score and advance
+    if (gotCorrect)
+    {
+        if (! gotWrong)
+            melodyNotesCorrect++;
+
+        practiceMLChart.setNoteState (melodyNoteIndex, MelodyChartComponent::NoteState::Correct);
+        melodyNoteIndex++;
+
+        feedbackLabel.setText ("Correct!", juce::dontSendNotification);
+        feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
+
+        if (melodyNoteIndex >= static_cast<int> (transposedMelody.notes.size()))
+        {
+            advanceMelodyNote(); // triggers key completion
+        }
+        else
+        {
+            advanceMelodyNote(); // shows next note target
+        }
+    }
+    else if (gotWrong && ! gotCorrect)
+    {
+        feedbackLabel.setText ("Wrong note!", juce::dontSendNotification);
+        feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::danger));
+    }
+
+    // Update keyboard colours
+    keyboardRef.clearAllColours();
+    if (melodyNoteIndex < static_cast<int> (transposedMelody.notes.size()))
+    {
+        const auto& nextNote = transposedMelody.notes[static_cast<size_t> (melodyNoteIndex)];
+        int nextMidi = melodyKeyRootMidi + nextNote.intervalFromKeyRoot;
+        if (nextMidi >= 0 && nextMidi < 128)
+            keyboardRef.setKeyColour (nextMidi, KeyColour::Target);
+    }
+    for (int n : activeNotes)
+    {
+        int pc = n % 12;
+        if (pc < 0) pc += 12;
+        if (pc == targetPC && gotCorrect)
+            keyboardRef.setKeyColour (n, KeyColour::Correct);
+        else if (pc != targetPC)
+            keyboardRef.setKeyColour (n, KeyColour::Wrong);
+    }
+    keyboardRef.repaint();
+}
+
+//==============================================================================
+// Melody backing pad
+//==============================================================================
+
+void PracticePanel::updateMelodyBacking()
+{
+    if (! backingToggle.getToggleState() || transposedMelody.chordContexts.empty())
+    {
+        stopMelodyBacking();
+        return;
+    }
+
+    if (melodyNoteIndex >= static_cast<int> (transposedMelody.notes.size()))
+        return;
+
+    // Find which chord context is active for the current note
+    double currentBeat = transposedMelody.notes[static_cast<size_t> (melodyNoteIndex)].startBeat;
+    int activeCC = -1;
+    for (int i = 0; i < static_cast<int> (transposedMelody.chordContexts.size()); ++i)
+    {
+        const auto& cc = transposedMelody.chordContexts[static_cast<size_t> (i)];
+        if (currentBeat >= cc.startBeat && currentBeat < cc.startBeat + cc.durationBeats)
+        {
+            activeCC = i;
+            break;
+        }
+    }
+
+    if (activeCC < 0)
+        activeCC = 0; // fallback to first
+
+    // Only change if chord context changed
+    if (activeCC == currentBackingChordIndex)
+        return;
+
+    // Stop old backing notes
+    stopMelodyBacking();
+
+    currentBackingChordIndex = activeCC;
+    const auto& cc = transposedMelody.chordContexts[static_cast<size_t> (activeCC)];
+
+    // Get chord tones for this quality
+    auto chordTones = ChordDetector::getChordTones (cc.quality);
+    int chordRoot = melodyKeyRootMidi + cc.intervalFromKeyRoot;
+
+    // Build MIDI notes for the backing pad (in a low register for pad sound)
+    int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
+    backingChordNotes.clear();
+
+    for (int tone : chordTones)
+    {
+        int midiNote = chordRoot + tone;
+        // Bring into range 48-72 (C3-C5) for a warm pad
+        while (midiNote > 72) midiNote -= 12;
+        while (midiNote < 48) midiNote += 12;
+
+        if (midiNote >= 0 && midiNote < 128)
+        {
+            backingChordNotes.push_back (midiNote);
+            processorRef.addPreviewMidi (juce::MidiMessage::noteOn (ch, midiNote, 0.4f));
+        }
+    }
+}
+
+void PracticePanel::stopMelodyBacking()
+{
+    if (backingChordNotes.empty())
+        return;
+
+    int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
+    for (int note : backingChordNotes)
+        processorRef.addPreviewMidi (juce::MidiMessage::noteOff (ch, note, 0.0f));
+
+    backingChordNotes.clear();
+    currentBackingChordIndex = -1;
 }

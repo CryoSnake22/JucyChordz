@@ -10,6 +10,7 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
                juce::MidiKeyboardComponent::horizontalKeyboard),
       voicingLibraryPanel(p),
       progressionLibraryPanel(p),
+      melodyLibraryPanel(p),
       practicePanel(p, keyboard) {
 
   setLookAndFeel(&chordyLookAndFeel);
@@ -85,7 +86,21 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
   // Tabbed library panel
   libraryTabs.addTab("Voicings", juce::Colour(ChordyTheme::bgSurface), &voicingLibraryPanel, false);
   libraryTabs.addTab("Progressions", juce::Colour(ChordyTheme::bgSurface), &progressionLibraryPanel, false);
-  libraryTabs.addTab("Melodies", juce::Colour(ChordyTheme::bgSurface), &melodiesPanel, false);
+  // Melody selection → practice panel
+  melodyLibraryPanel.onSelectionChanged = [this](const juce::String& melodyId) {
+    if (melodyId.isNotEmpty() && libraryTabs.getCurrentTabIndex() == 2)
+      practicePanel.setSelectedMelodyId(melodyId);
+  };
+
+  // Melody note preview → highlight keyboard
+  melodyLibraryPanel.onNotePreview = [this](const std::vector<int>& midiNotes) {
+    keyboard.clearAllColours();
+    for (int note : midiNotes)
+      keyboard.setKeyColour(note, KeyColour::Correct);
+    keyboard.repaint();
+  };
+
+  libraryTabs.addTab("Melodies", juce::Colour(ChordyTheme::bgSurface), &melodyLibraryPanel, false);
   libraryTabs.setTabBarDepth(28);
   libraryTabs.setOutline(0);
   addAndMakeVisible(libraryTabs);
@@ -130,7 +145,7 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
   synthVolumeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
       processorRef.apvts, "synthVolume", synthVolumeSlider);
 
-  setSize(1000, 660);
+  setSize(1100, 740);
   startTimerHz(60);
 }
 
@@ -249,9 +264,11 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
   voicingLibraryPanel.updateRecording(notes);
   progressionLibraryPanel.updateRecording(notes);
   progressionLibraryPanel.updateTimerCallback();
+  melodyLibraryPanel.updateRecording(notes);
+  melodyLibraryPanel.updateTimerCallback();
 
-  // Highlight keyboard during progression playback
-  if (processorRef.isPlayingProgression() && !practicePanel.isPracticing() && previewNotes.empty()) {
+  // Highlight keyboard during progression/melody playback
+  if ((processorRef.isPlayingProgression() || processorRef.isPlayingMelody()) && !practicePanel.isPracticing() && previewNotes.empty()) {
     uint64_t pLow = processorRef.playbackNotesLow.load(std::memory_order_relaxed);
     uint64_t pHigh = processorRef.playbackNotesHigh.load(std::memory_order_relaxed);
     keyboard.clearAllColours();
@@ -269,6 +286,7 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
     practicePanel.updatePractice(notes);
     voicingLibraryPanel.refreshStatsChart();
     progressionLibraryPanel.refreshStatsChart();
+    melodyLibraryPanel.refreshStatsChart();
   }
 
   // Voicing preview auto-off
@@ -306,6 +324,13 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
         practicePanel.setSelectedProgressionId(pid);
       else
         practicePanel.setSelectedProgressionId({});
+    } else if (currentTab == 2) {
+      // Switched to Melodies — update practice panel from melody selection
+      auto mid = melodyLibraryPanel.getSelectedMelodyId();
+      if (mid.isNotEmpty())
+        practicePanel.setSelectedMelodyId(mid);
+      else
+        practicePanel.setSelectedMelodyId({});
     }
   }
 
