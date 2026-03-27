@@ -43,6 +43,28 @@ Melody MelodyLibrary::transposeMelody (const Melody& m, int semitones)
         cc.name = rootName + qualLabel;
     }
 
+    // Transpose rawMidi note events so playback matches the transposed key
+    if (semitones != 0)
+    {
+        juce::MidiMessageSequence transposedMidi;
+        for (int i = 0; i < result.rawMidi.getNumEvents(); ++i)
+        {
+            auto* evt = result.rawMidi.getEventPointer (i);
+            auto msg = evt->message;
+            if (msg.isNoteOnOrOff())
+            {
+                int newNote = juce::jlimit (0, 127, msg.getNoteNumber() + semitones);
+                if (msg.isNoteOn())
+                    msg = juce::MidiMessage::noteOn (msg.getChannel(), newNote, msg.getVelocity());
+                else
+                    msg = juce::MidiMessage::noteOff (msg.getChannel(), newNote, msg.getFloatVelocity());
+                msg.setTimeStamp (evt->message.getTimeStamp());
+            }
+            transposedMidi.addEvent (msg);
+        }
+        result.rawMidi = transposedMidi;
+    }
+
     return result;
 }
 

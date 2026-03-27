@@ -121,6 +121,34 @@ ProgressionLibraryPanel::ProgressionLibraryPanel (AudioPluginAudioProcessor& pro
     deleteButton.setColour (juce::TextButton::buttonColourId, juce::Colour (ChordyTheme::dangerMuted));
     addAndMakeVisible (deleteButton);
 
+    statsChart.onKeyClicked = [this](int keyIndex) {
+        if (panelState != PanelState::Idle) return;
+        auto id = getSelectedProgressionId();
+        const auto* prog = processorRef.progressionLibrary.getProgression (id);
+        if (prog == nullptr) return;
+
+        // Toggle off if same key clicked while playing
+        if (processorRef.isPlayingProgression() && statsPlayingKey == keyIndex)
+        {
+            processorRef.stopProgressionPlayback();
+            playButton.setButtonText ("Play");
+            statsChart.setPlayingKey (-1);
+            statsPlayingKey = -1;
+            return;
+        }
+
+        // Stop any current playback
+        if (processorRef.isPlayingProgression())
+            processorRef.stopProgressionPlayback();
+
+        int semitones = (keyIndex - prog->keyPitchClass + 12) % 12;
+        if (semitones > 6) semitones -= 12;
+        auto transposed = ProgressionLibrary::transposeProgression (*prog, semitones);
+        processorRef.startProgressionPlayback (transposed);
+        playButton.setButtonText ("Stop");
+        statsChart.setPlayingKey (keyIndex);
+        statsPlayingKey = keyIndex;
+    };
     addAndMakeVisible (statsChart);
 
     // --- Editing ---
@@ -665,7 +693,11 @@ void ProgressionLibraryPanel::updateTimerCallback()
 
         // Reset play button text if playback ended naturally
         if (panelState == PanelState::Idle)
+        {
             playButton.setButtonText ("Play");
+            statsChart.setPlayingKey (-1);
+            statsPlayingKey = -1;
+        }
         else if (panelState == PanelState::Editing)
             editPlayBtn.setButtonText ("Play");
     }
@@ -903,6 +935,8 @@ void ProgressionLibraryPanel::onPlayToggle()
     {
         processorRef.stopProgressionPlayback();
         playButton.setButtonText ("Play");
+        statsChart.setPlayingKey (-1);
+        statsPlayingKey = -1;
     }
     else
     {

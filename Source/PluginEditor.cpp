@@ -69,6 +69,11 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
       keyboard.repaint();
     }
   };
+  // Stats chart key preview → play voicing in clicked key
+  voicingLibraryPanel.onKeyPreview = [this](const std::vector<int>& notes, const std::vector<int>& velocities) {
+    startVoicingPreview(notes, velocities);
+  };
+
   // Progression chord preview → highlight keyboard
   progressionLibraryPanel.onChordPreview = [this](const std::vector<int>& midiNotes) {
     keyboard.clearAllColours();

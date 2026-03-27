@@ -100,6 +100,22 @@ VoicingLibraryPanel::VoicingLibraryPanel (AudioPluginAudioProcessor& processor)
     voicingList.setOutlineThickness (1);
     addAndMakeVisible (voicingList);
 
+    statsChart.onKeyClicked = [this](int keyIndex) {
+        auto id = getSelectedVoicingId();
+        if (id.isEmpty()) return;
+        const auto* v = processorRef.voicingLibrary.getVoicing (id);
+        if (v == nullptr) return;
+
+        // Transpose to clicked key, staying near original octave
+        int semitoneShift = keyIndex - v->rootPitchClass;
+        if (semitoneShift < -6) semitoneShift += 12;
+        if (semitoneShift > 6) semitoneShift -= 12;
+        int rootMidi = v->octaveReference + semitoneShift;
+
+        auto notes = VoicingLibrary::transposeToKey (*v, rootMidi);
+        if (onKeyPreview)
+            onKeyPreview (notes, v->velocities);
+    };
     addAndMakeVisible (statsChart);
 
     recordButton.onClick = [this] { onRecordToggle(); };

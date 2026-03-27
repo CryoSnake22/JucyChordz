@@ -126,6 +126,34 @@ MelodyLibraryPanel::MelodyLibraryPanel (AudioPluginAudioProcessor& processor)
     deleteButton.setColour (juce::TextButton::buttonColourId, juce::Colour (ChordyTheme::dangerMuted));
     addAndMakeVisible (deleteButton);
 
+    statsChart.onKeyClicked = [this](int keyIndex) {
+        if (panelState != PanelState::Idle) return;
+        auto id = getSelectedMelodyId();
+        const auto* mel = processorRef.melodyLibrary.getMelody (id);
+        if (mel == nullptr || mel->notes.empty()) return;
+
+        // Toggle off if same key clicked while playing
+        if (processorRef.isPlayingMelody() && statsPlayingKey == keyIndex)
+        {
+            processorRef.stopMelodyPlayback();
+            playButton.setButtonText ("Play");
+            statsChart.setPlayingKey (-1);
+            statsPlayingKey = -1;
+            return;
+        }
+
+        if (processorRef.isPlayingMelody())
+            processorRef.stopMelodyPlayback();
+
+        int semitones = (keyIndex - mel->keyPitchClass + 12) % 12;
+        if (semitones > 6) semitones -= 12;
+        auto transposed = MelodyLibrary::transposeMelody (*mel, semitones);
+        int keyRoot = 60 + transposed.keyPitchClass;
+        processorRef.startMelodyPlayback (transposed, keyRoot);
+        playButton.setButtonText ("Stop");
+        statsChart.setPlayingKey (keyIndex);
+        statsPlayingKey = keyIndex;
+    };
     addAndMakeVisible (statsChart);
 
     // --- Editing ---
@@ -584,7 +612,11 @@ void MelodyLibraryPanel::updateTimerCallback()
             editChart.setCursorBeat (-1.0);
 
         if (panelState == PanelState::Idle)
+        {
             playButton.setButtonText ("Play");
+            statsChart.setPlayingKey (-1);
+            statsPlayingKey = -1;
+        }
         else if (panelState == PanelState::Editing)
             editPlayButton.setButtonText ("Play");
     }
@@ -847,6 +879,8 @@ void MelodyLibraryPanel::onPlayToggle()
     {
         processorRef.stopMelodyPlayback();
         playButton.setButtonText ("Play");
+        statsChart.setPlayingKey (-1);
+        statsPlayingKey = -1;
         return;
     }
 

@@ -52,6 +52,7 @@ private:
     juce::TextButton editButton { "Edit" };
     juce::TextButton deleteButton { "Delete" };
     VoicingStatsChart statsChart;
+    int statsPlayingKey = -1;
 
     // --- Count-in state ---
     int countInBeatsElapsed = 0;
