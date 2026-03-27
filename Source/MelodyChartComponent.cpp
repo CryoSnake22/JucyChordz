@@ -206,7 +206,9 @@ juce::Rectangle<float> MelodyChartComponent::getChordContextRect (
 
     float x = leftPad + static_cast<float> (clipStart - rowStartBeat) * bw;
     float w = static_cast<float> (clipEnd - clipStart) * bw;
-    float y = static_cast<float> (row * (rowHeight() + rowGap)) + getNoteAreaHeight();
+    float rowY = static_cast<float> (row * (rowHeight() + rowGap));
+    float noteY = (viewportHeight > 0) ? rowY + static_cast<float> (melodyPad) : rowY;
+    float y = noteY + static_cast<float> (getNoteAreaHeight()) + 2.0f;
 
     return { x, y, w, static_cast<float> (chordBarHeight) };
 }
@@ -434,7 +436,7 @@ void MelodyChartComponent::paint (juce::Graphics& g)
 {
     auto* mel = getMelody();
 
-    g.fillAll (juce::Colour (ChordyTheme::bgDeepest));
+    g.fillAll (juce::Colour (ChordyTheme::bgSurface));
 
     if (mel == nullptr || mel->notes.empty())
     {
@@ -459,39 +461,37 @@ void MelodyChartComponent::paint (juce::Graphics& g)
     int minI, maxI;
     computePitchRange (minI, maxI);
 
+    float mPad = static_cast<float> (melodyPad);
+    int noteH = getNoteAreaHeight();
+
     // Draw rows (note area + chord bar)
     for (int row = 0; row < numRows; ++row)
     {
         float y = static_cast<float> (row * (rowHeight() + rowGap));
+        float noteAreaW = static_cast<float> (getWidth() - leftPad - rightPad);
+        float noteY = (viewportHeight > 0) ? y + mPad : y;
 
-        // Note area background
-        g.setColour (juce::Colour (ChordyTheme::bgSurface));
-        g.fillRoundedRectangle (static_cast<float> (leftPad), y,
-                                static_cast<float> (getWidth() - leftPad - rightPad),
-                                static_cast<float> (getNoteAreaHeight()), ChordyTheme::cornerRadius);
-
-        // Chord bar background
-        float chordY = y + getNoteAreaHeight();
+        // Chord bar background (flat, no rounding)
+        float chordY = noteY + static_cast<float> (noteH) + 2.0f;
         g.setColour (juce::Colour (ChordyTheme::melodyChordBg));
-        g.fillRoundedRectangle (static_cast<float> (leftPad), chordY,
-                                static_cast<float> (getWidth() - leftPad - rightPad),
-                                static_cast<float> (chordBarHeight), ChordyTheme::cornerRadius);
+        g.fillRect (static_cast<float> (leftPad), chordY,
+                    noteAreaW, static_cast<float> (chordBarHeight));
 
-        // Bar lines
-        g.setColour (juce::Colour (ChordyTheme::chartBarLine));
+        // Bar lines (full note area height)
+        g.setColour (juce::Colour (ChordyTheme::chartBarLine).withAlpha (0.4f));
         for (int beat = 0; beat <= beatsPerRow; beat += beatsPerBar)
         {
             float x = leftPad + beat * bw;
-            g.drawVerticalLine (static_cast<int> (x), y, y + getNoteAreaHeight());
+            g.drawVerticalLine (static_cast<int> (x), noteY, noteY + static_cast<float> (noteH));
         }
 
-        // Beat grid lines (lighter, within note area)
-        g.setColour (juce::Colour (ChordyTheme::chartBarLine).withAlpha (0.4f));
+        // Beat grid lines (lighter)
+        g.setColour (juce::Colour (ChordyTheme::chartBarLine).withAlpha (0.2f));
         for (int beat = 1; beat < beatsPerRow; ++beat)
         {
-            if (beat % beatsPerBar == 0) continue; // already drawn
+            if (beat % beatsPerBar == 0) continue;
             float x = leftPad + beat * bw;
-            g.drawVerticalLine (static_cast<int> (x), y, y + getNoteAreaHeight());
+            g.drawVerticalLine (static_cast<int> (x), noteY, noteY + static_cast<float> (noteH));
         }
     }
 
