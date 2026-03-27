@@ -23,7 +23,7 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
   addAndMakeVisible(titleLabel);
 
   // Chord display
-  chordDisplayLabel.setText("Play something...", juce::dontSendNotification);
+  chordDisplayLabel.setText("...", juce::dontSendNotification);
   chordDisplayLabel.setFont(juce::FontOptions(36.0f, juce::Font::bold));
   chordDisplayLabel.setColour(juce::Label::textColourId, juce::Colour(ChordyTheme::textPrimary));
   chordDisplayLabel.setJustificationType(juce::Justification::centred);
@@ -316,8 +316,10 @@ void AudioPluginAudioProcessorEditor::resized() {
 
   // Tempo bar
   auto tempoArea = area.removeFromTop(36).reduced(8, 2);
-  settingsToggle.setBounds(tempoArea.removeFromLeft(70));
+  settingsToggle.setBounds(tempoArea.removeFromLeft(settingsExpanded ? 95 : 70));
   tempoArea.removeFromLeft(8);
+
+  bool isExternal = *processorRef.apvts.getRawParameterValue("synthEnabled") <= 0.5f;
 
   if (settingsExpanded)
   {
@@ -331,49 +333,13 @@ void AudioPluginAudioProcessorEditor::resized() {
     tempoArea.removeFromLeft(8);
     instrumentModeCombo.setBounds(tempoArea.removeFromLeft(100));
     tempoArea.removeFromLeft(4);
-    if (pluginSelector.isVisible())
-    {
-      pluginSelector.setBounds(tempoArea.removeFromLeft(140));
-      tempoArea.removeFromLeft(4);
-      rescanButton.setBounds(tempoArea.removeFromLeft(40));
-      tempoArea.removeFromLeft(4);
-      if (editPluginButton.isVisible())
-      {
-        editPluginButton.setBounds(tempoArea.removeFromLeft(55));
-        tempoArea.removeFromLeft(4);
-      }
-    }
-    synthVolumeSlider.setBounds(tempoArea.removeFromLeft(70));
-    tempoArea.removeFromLeft(8);
-
-    bpmLabel.setVisible(true);
-    bpmSlider.setVisible(true);
-    metronomeToggle.setVisible(true);
-    metronomeVolumeSlider.setVisible(true);
-    hostSyncToggle.setVisible(true);
-    instrumentModeCombo.setVisible(true);
-    synthVolumeSlider.setVisible(true);
-  }
-  else
-  {
-    bool isExternal = *processorRef.apvts.getRawParameterValue("synthEnabled") <= 0.5f;
-
-    bpmLabel.setVisible(false);
-    bpmSlider.setVisible(false);
-    metronomeToggle.setVisible(false);
-    metronomeVolumeSlider.setVisible(false);
-    hostSyncToggle.setVisible(false);
-    instrumentModeCombo.setVisible(true);  // always show mode selector
-    instrumentModeCombo.setBounds(tempoArea.removeFromLeft(100));
-    tempoArea.removeFromLeft(4);
-
     if (isExternal)
     {
       pluginSelector.setVisible(true);
       pluginSelector.setBounds(tempoArea.removeFromLeft(140));
       tempoArea.removeFromLeft(4);
       rescanButton.setVisible(true);
-      rescanButton.setBounds(tempoArea.removeFromLeft(40));
+      rescanButton.setBounds(tempoArea.removeFromLeft(50));
       tempoArea.removeFromLeft(4);
       editPluginButton.setVisible(processorRef.externalInstrument.isPluginLoaded());
       if (editPluginButton.isVisible())
@@ -388,7 +354,28 @@ void AudioPluginAudioProcessorEditor::resized() {
       rescanButton.setVisible(false);
       editPluginButton.setVisible(false);
     }
+    synthVolumeSlider.setBounds(tempoArea.removeFromLeft(70));
+    tempoArea.removeFromLeft(8);
 
+    bpmLabel.setVisible(true);
+    bpmSlider.setVisible(true);
+    metronomeToggle.setVisible(true);
+    metronomeVolumeSlider.setVisible(true);
+    hostSyncToggle.setVisible(true);
+    instrumentModeCombo.setVisible(true);
+    synthVolumeSlider.setVisible(true);
+  }
+  else
+  {
+    bpmLabel.setVisible(false);
+    bpmSlider.setVisible(false);
+    metronomeToggle.setVisible(false);
+    metronomeVolumeSlider.setVisible(false);
+    hostSyncToggle.setVisible(false);
+    instrumentModeCombo.setVisible(false);
+    pluginSelector.setVisible(false);
+    rescanButton.setVisible(false);
+    editPluginButton.setVisible(false);
     synthVolumeSlider.setVisible(false);
   }
   beatIndicator.setBounds(tempoArea);
@@ -434,12 +421,19 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
   } else {
     chordDisplayLabel.setFont(juce::FontOptions(36.0f, juce::Font::bold));
     nextRootLabel.setVisible(false);
+
+    // During playback, show current chord name from the preview
+    auto playbackChord = practicePanel.getPlaybackChordName();
+    if (playbackChord.isNotEmpty()) {
+      chordDisplayLabel.setText(playbackChord, juce::dontSendNotification);
+      chordDisplayLabel.setColour(juce::Label::textColourId, juce::Colour(ChordyTheme::accent));
+    } else {
     // Normal chord display — use last-played notes when keys are released
     chordDisplayLabel.setColour(juce::Label::textColourId, juce::Colour(ChordyTheme::textPrimary));
     auto displayNotes = notes.empty() ? processorRef.getLastPlayedNotes() : notes;
 
     if (displayNotes.empty()) {
-      chordDisplayLabel.setText("Play something...", juce::dontSendNotification);
+      chordDisplayLabel.setText("...", juce::dontSendNotification);
     } else {
       juce::String customName;
       if (processorRef.voicingLibrary.findByNotes(displayNotes, customName) != nullptr) {
@@ -452,12 +446,7 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
           chordDisplayLabel.setText("...", juce::dontSendNotification);
       }
     }
-  }
-
-  // Clear voicing preview highlight when user plays notes (not during practice/preview)
-  if (!notes.empty() && !practicePanel.isPracticing() && previewNotes.empty()) {
-    keyboard.clearAllColours();
-    keyboard.repaint();
+    } // end non-playback else
   }
 
   // Update recording state machines

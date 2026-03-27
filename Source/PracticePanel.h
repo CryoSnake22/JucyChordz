@@ -59,6 +59,7 @@ public:
     void clearChartPreview();
     void showProgressionCursor (double beat);
     void showMelodyCursor (double beat);
+    juce::String getPlaybackChordName() const;
 
 private:
     juce::String selectedVoicingId;

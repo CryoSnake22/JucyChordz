@@ -96,6 +96,13 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
     practiceChart.onChordSelected = [this](int chordIdx) {
         if (practicing) return;
         if (! showingProgPreview) return;
+
+        // Stop any active playback
+        if (processorRef.isPlayingProgression())
+            processorRef.stopProgressionPlayback();
+        if (processorRef.isPlayingMelody())
+            processorRef.stopMelodyPlayback();
+
         if (chordIdx < 0 || chordIdx >= static_cast<int> (previewProgression.chords.size())) return;
 
         const auto& chord = previewProgression.chords[static_cast<size_t> (chordIdx)];
@@ -124,6 +131,12 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
     practiceMLChart.onNoteSelected = [this](int noteIdx) {
         if (practicing) return;
         if (! showingMelPreview) return;
+
+        // Stop any active playback
+        if (processorRef.isPlayingProgression())
+            processorRef.stopProgressionPlayback();
+        if (processorRef.isPlayingMelody())
+            processorRef.stopMelodyPlayback();
         if (noteIdx < 0 || noteIdx >= static_cast<int> (previewMelody.notes.size())) return;
 
         const auto& note = previewMelody.notes[static_cast<size_t> (noteIdx)];
@@ -655,6 +668,20 @@ void PracticePanel::clearChartPreview()
     practiceMLChart.setMelodyReadOnly (nullptr);
     resized();
     repaint();
+}
+
+juce::String PracticePanel::getPlaybackChordName() const
+{
+    if (showingProgPreview && processorRef.isPlayingProgression())
+    {
+        double beat = processorRef.getPlaybackBeatPosition();
+        for (const auto& chord : previewProgression.chords)
+        {
+            if (beat >= chord.startBeat && beat < chord.startBeat + chord.durationBeats)
+                return chord.getDisplayName();
+        }
+    }
+    return {};
 }
 
 void PracticePanel::showProgressionCursor (double beat)
@@ -2254,21 +2281,21 @@ void PracticePanel::updateMelodyBacking()
     currentBackingChordIndex = activeCC;
     const auto& cc = transposedMelody.chordContexts[static_cast<size_t> (activeCC)];
 
-    // Get chord tones for this quality
+    // Get chord tones for this quality — root position, stacked thirds
     auto chordTones = ChordDetector::getChordTones (cc.quality);
-    int chordRoot = melodyKeyRootMidi + cc.intervalFromKeyRoot;
+    int chordRootPC = (melodyKeyRootMidi + cc.intervalFromKeyRoot) % 12;
+    if (chordRootPC < 0) chordRootPC += 12;
 
-    // Build MIDI notes for the backing pad (in a low register for pad sound)
+    // Build from C3 (48) register, root at bottom, intervals stacking upward
+    int baseRoot = 48 + chordRootPC;  // root in octave 3
+    if (baseRoot > 54) baseRoot -= 12; // keep root in C3-F#3 range for warmth
+
     int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
     backingChordNotes.clear();
 
     for (int tone : chordTones)
     {
-        int midiNote = chordRoot + tone;
-        // Bring into range 48-72 (C3-C5) for a warm pad
-        while (midiNote > 72) midiNote -= 12;
-        while (midiNote < 48) midiNote += 12;
-
+        int midiNote = baseRoot + tone;
         if (midiNote >= 0 && midiNote < 128)
         {
             backingChordNotes.push_back (midiNote);
