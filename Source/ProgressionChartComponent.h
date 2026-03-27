@@ -19,6 +19,7 @@ public:
 
     int getSelectedChord() const { return selectedChordIndex; }
     int getIdealHeight() const;
+    void setViewportHeight (int height);
 
     // Detailed (piano-roll) vs simple (chord names) view
     void setDetailedView (bool enabled);
@@ -62,16 +63,18 @@ private:
 
     static constexpr int beatsPerRow = 16;
     static constexpr int simpleRowHeight = 30;
-    static constexpr int rowGap = 3;
+    static constexpr int rowGap = 4;
     static constexpr int leftPad = 4;
     static constexpr int rightPad = 4;
     static constexpr float edgeHitZone = 6.0f;
 
     // Detailed view layout
-    static constexpr int detailedNoteAreaHeight = 100;
     static constexpr int detailedChordLabelHeight = 22;
+    static constexpr int detailedPad = 8;  // top + bottom padding within each row
+    int viewportHeight = 200;  // set by parent to fill available space
 
     int getEffectiveRowHeight() const;
+    int getDetailedNoteAreaHeight() const;
     float getBeatWidth() const;
     int getRowForBeat (double beat) const;
     juce::Rectangle<float> getChordRect (const ProgressionChord& chord, int row) const;

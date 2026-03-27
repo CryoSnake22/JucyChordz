@@ -186,6 +186,8 @@ void PracticePanel::resized()
     if (showProgChart)
     {
         practiceChartViewport.setBounds (area);
+        // Tell chart how tall one row should be (fills viewport height)
+        practiceChart.setViewportHeight (area.getHeight());
         int idealH = juce::jmax (1, practiceChart.getIdealHeight());
         int scrollbarW = (idealH > area.getHeight()) ? 10 : 0;
         practiceChart.setBounds (0, 0, area.getWidth() - scrollbarW, idealH);

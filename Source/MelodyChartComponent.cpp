@@ -426,17 +426,17 @@ void MelodyChartComponent::paint (juce::Graphics& g)
         float y = static_cast<float> (row * (rowHeight() + rowGap));
 
         // Note area background
-        g.setColour (juce::Colour (ChordyTheme::chartGrid));
+        g.setColour (juce::Colour (ChordyTheme::bgSurface));
         g.fillRoundedRectangle (static_cast<float> (leftPad), y,
                                 static_cast<float> (getWidth() - leftPad - rightPad),
-                                static_cast<float> (noteAreaHeight), 4.0f);
+                                static_cast<float> (noteAreaHeight), ChordyTheme::cornerRadius);
 
         // Chord bar background
         float chordY = y + noteAreaHeight;
         g.setColour (juce::Colour (ChordyTheme::melodyChordBg));
         g.fillRoundedRectangle (static_cast<float> (leftPad), chordY,
                                 static_cast<float> (getWidth() - leftPad - rightPad),
-                                static_cast<float> (chordBarHeight), 3.0f);
+                                static_cast<float> (chordBarHeight), ChordyTheme::cornerRadius);
 
         // Bar lines
         g.setColour (juce::Colour (ChordyTheme::chartBarLine));
@@ -447,7 +447,7 @@ void MelodyChartComponent::paint (juce::Graphics& g)
         }
 
         // Beat grid lines (lighter, within note area)
-        g.setColour (juce::Colour (ChordyTheme::chartBarLine).withAlpha (0.3f));
+        g.setColour (juce::Colour (ChordyTheme::chartBarLine).withAlpha (0.4f));
         for (int beat = 1; beat < beatsPerRow; ++beat)
         {
             if (beat % beatsPerBar == 0) continue; // already drawn
@@ -472,7 +472,7 @@ void MelodyChartComponent::paint (juce::Graphics& g)
             bool isSelected = (i == selectedChordContextIndex);
 
             g.setColour (juce::Colour (isSelected ? ChordyTheme::melodyChordActive : ChordyTheme::melodyChordBg));
-            g.fillRoundedRectangle (inset, 3.0f);
+            g.fillRect (inset);
 
             if (isSelected)
             {
@@ -516,24 +516,27 @@ void MelodyChartComponent::paint (juce::Graphics& g)
             if (rect.isEmpty()) continue;
 
             g.setColour (juce::Colour (noteColour));
-            g.fillRoundedRectangle (rect, 3.0f);
+            g.fillRect (rect);
 
             // Draw amber outline for the current target note
             if (isTarget)
             {
                 g.setColour (juce::Colour (ChordyTheme::accent));
-                g.drawRoundedRectangle (rect, 3.0f, 2.0f);
+                g.drawRect (rect, 1.5f);
             }
 
-            // Note name inside rect
-            int pitchClass = ((mel->keyPitchClass + note.intervalFromKeyRoot) % 12 + 12) % 12;
-            juce::String noteName = ChordDetector::noteNameFromPitchClass (pitchClass);
+            // Note name inside rect — only if large enough to read
+            if (rect.getWidth() > 28.0f && rect.getHeight() > 9.0f)
+            {
+                int pitchClass = ((mel->keyPitchClass + note.intervalFromKeyRoot) % 12 + 12) % 12;
+                juce::String noteName = ChordDetector::noteNameFromPitchClass (pitchClass);
 
-            g.setColour (state == NoteState::Correct || state == NoteState::Missed
-                         ? juce::Colour (ChordyTheme::bgDeepest)
-                         : juce::Colour (ChordyTheme::textPrimary));
-            g.setFont (11.0f);
-            g.drawText (noteName, rect, juce::Justification::centred, false);
+                g.setColour (state == NoteState::Correct || state == NoteState::Missed
+                             ? juce::Colour (0xFF1A1A1A)
+                             : juce::Colour (ChordyTheme::textSecondary));
+                g.setFont (8.0f);
+                g.drawText (noteName, rect.reduced (1.0f, 0), juce::Justification::centred, false);
+            }
         }
     }
 

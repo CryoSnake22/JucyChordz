@@ -93,11 +93,22 @@ int ProgressionChartComponent::getIdealHeight() const
     return numRows * (getEffectiveRowHeight() + rowGap);
 }
 
+void ProgressionChartComponent::setViewportHeight (int height)
+{
+    viewportHeight = juce::jmax (60, height);
+}
+
+int ProgressionChartComponent::getDetailedNoteAreaHeight() const
+{
+    // Each row fills the viewport: row = padding + noteArea + gap + chordLabel + padding
+    return viewportHeight - detailedChordLabelHeight - detailedPad * 2 - 2;
+}
+
 int ProgressionChartComponent::getEffectiveRowHeight() const
 {
-    return (detailedView && ! editMode)
-        ? (detailedNoteAreaHeight + detailedChordLabelHeight + 4)
-        : simpleRowHeight;
+    if (detailedView && ! editMode)
+        return viewportHeight;  // each row fills one viewport height
+    return simpleRowHeight;
 }
 
 float ProgressionChartComponent::getBeatWidth() const
@@ -417,9 +428,9 @@ float ProgressionChartComponent::midiToY (int midiNote, int minMidi, int maxMidi
     float range = static_cast<float> (maxMidi - minMidi);
     if (range <= 0.0f) range = 12.0f;
     float normalised = static_cast<float> (midiNote - minMidi) / range;
-    constexpr float innerPad = 8.0f;
-    float availableH = static_cast<float> (detailedNoteAreaHeight) - innerPad * 2.0f;
-    return rowY + innerPad + availableH * (1.0f - normalised);
+    float topOff = static_cast<float> (detailedPad);
+    float availableH = static_cast<float> (getDetailedNoteAreaHeight()) - topOff * 2.0f;
+    return rowY + topOff + availableH * (1.0f - normalised);
 }
 
 juce::Rectangle<float> ProgressionChartComponent::getNoteDetailRect (
@@ -584,31 +595,33 @@ void ProgressionChartComponent::paintDetailed (juce::Graphics& g, const Progress
     int minMidi, maxMidi;
     computePitchRange (minMidi, maxMidi);
 
-    constexpr float pad = 6.0f;  // inner padding
+    float dPad = static_cast<float> (detailedPad);
+    int noteAreaH = getDetailedNoteAreaHeight();
 
     // Draw rows
     for (int row = 0; row < numRows; ++row)
     {
         float y = static_cast<float> (row * (rh + rowGap));
         float noteAreaW = static_cast<float> (getWidth() - leftPad - rightPad);
+        float noteY = y + dPad;  // top padding before note area
 
         // Note area background
         g.setColour (juce::Colour (ChordyTheme::bgSurface));
-        g.fillRoundedRectangle (static_cast<float> (leftPad), y,
-                                noteAreaW, static_cast<float> (detailedNoteAreaHeight), ChordyTheme::cornerRadius);
+        g.fillRoundedRectangle (static_cast<float> (leftPad), noteY,
+                                noteAreaW, static_cast<float> (noteAreaH), ChordyTheme::cornerRadius);
 
-        // Chord label bar background
-        float labelY = y + detailedNoteAreaHeight + 2.0f;
+        // Chord label bar background (below note area)
+        float labelY = noteY + static_cast<float> (noteAreaH) + 2.0f;
         g.setColour (juce::Colour (ChordyTheme::melodyChordBg));
         g.fillRoundedRectangle (static_cast<float> (leftPad), labelY,
                                 noteAreaW, static_cast<float> (detailedChordLabelHeight), ChordyTheme::cornerRadius);
 
-        // Bar lines in note area (inside padding)
+        // Bar lines in note area
         g.setColour (juce::Colour (ChordyTheme::chartBarLine).withAlpha (0.4f));
         for (int beat = 0; beat <= beatsPerRow; beat += beatsPerBar)
         {
             float x = leftPad + beat * bw;
-            g.drawVerticalLine (static_cast<int> (x), y + pad, y + detailedNoteAreaHeight - pad);
+            g.drawVerticalLine (static_cast<int> (x), noteY + dPad, noteY + static_cast<float> (noteAreaH) - dPad);
         }
     }
 
@@ -629,10 +642,10 @@ void ProgressionChartComponent::paintDetailed (juce::Graphics& g, const Progress
 
             float x = leftPad + static_cast<float> (clipStart - rowStartBeat) * bw;
             float w = static_cast<float> (clipEnd - clipStart) * bw;
-            float y = static_cast<float> (row * (rh + rowGap));
+            float y = static_cast<float> (row * (rh + rowGap)) + dPad;
 
             g.setColour (juce::Colour (ChordyTheme::accent).withAlpha (0.12f));
-            g.fillRect (x, y, w, static_cast<float> (detailedNoteAreaHeight));
+            g.fillRect (x, y, w, static_cast<float> (noteAreaH));
         }
     }
 
@@ -691,7 +704,7 @@ void ProgressionChartComponent::paintDetailed (juce::Graphics& g, const Progress
 
         // Chord label in label bar
         int labelRow = startRow;  // label appears in the row where chord starts
-        float labelRowY = static_cast<float> (labelRow * (rh + rowGap)) + detailedNoteAreaHeight + 2.0f;
+        float labelRowY = static_cast<float> (labelRow * (rh + rowGap)) + dPad + static_cast<float> (noteAreaH) + 2.0f;
         double rowStartBeat = labelRow * beatsPerRow;
         double rowEndBeat = rowStartBeat + beatsPerRow;
         double clipStart = juce::jmax (chord.startBeat, rowStartBeat);

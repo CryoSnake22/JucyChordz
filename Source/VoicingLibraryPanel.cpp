@@ -102,6 +102,7 @@ VoicingLibraryPanel::VoicingLibraryPanel (AudioPluginAudioProcessor& processor)
     voicingList.setModel (this);
     // List colors inherited from LookAndFeel
     voicingList.setOutlineThickness (1);
+    voicingList.setRowHeight (36);
     addAndMakeVisible (voicingList);
 
     statsChart.onKeyClicked = [this](int keyIndex) {
@@ -126,6 +127,7 @@ VoicingLibraryPanel::VoicingLibraryPanel (AudioPluginAudioProcessor& processor)
     addAndMakeVisible (recordButton);
 
     deleteButton.onClick = [this] { onDelete(); };
+    deleteButton.setColour (juce::TextButton::buttonColourId, juce::Colour (ChordyTheme::dangerMuted));
     addAndMakeVisible (deleteButton);
 
     // --- Confirmation mode ---
@@ -251,7 +253,7 @@ void VoicingLibraryPanel::layoutNormalMode (juce::Rectangle<int> area)
     area.removeFromBottom (4);
 
     // Stats chart between list and buttons
-    auto chartArea = area.removeFromBottom (80);
+    auto chartArea = area.removeFromBottom (60);
     area.removeFromBottom (4);
     statsChart.setBounds (chartArea);
 
@@ -559,12 +561,12 @@ void VoicingLibraryPanel::paintListBoxItem (int rowNumber, juce::Graphics& g,
         g.fillAll (juce::Colour (ChordyTheme::bgSurface));
 
     g.setColour (juce::Colour (ChordyTheme::textPrimary));
-    g.setFont (15.0f);
+    g.setFont (14.0f);
     g.drawText (v.name, 8, 0, width - 80, height, juce::Justification::centredLeft);
 
     // Show quality + alterations badge
     g.setColour (juce::Colour (ChordyTheme::textSecondary));
-    g.setFont (12.0f);
+    g.setFont (11.0f);
     g.drawText (v.getQualityLabel(),
                 width - 70, 0, 62, height, juce::Justification::centredRight);
 }

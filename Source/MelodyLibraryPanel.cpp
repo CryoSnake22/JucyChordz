@@ -964,7 +964,7 @@ void MelodyLibraryPanel::paintListBoxItem (int rowNumber, juce::Graphics& g,
 
     // Name on top line
     g.setColour (juce::Colour (ChordyTheme::textPrimary));
-    g.setFont (13.0f);
+    g.setFont (14.0f);
     g.drawText (m.name, 8, 2, width - 16, 16, juce::Justification::centredLeft);
 
     // Chord context summary on second line
@@ -972,7 +972,7 @@ void MelodyLibraryPanel::paintListBoxItem (int rowNumber, juce::Graphics& g,
     if (ctx.isNotEmpty())
     {
         g.setColour (juce::Colour (ChordyTheme::textTertiary));
-        g.setFont (10.0f);
+        g.setFont (11.0f);
         g.drawText (ctx, 8, 18, width - 16, 14, juce::Justification::centredLeft);
     }
 }
