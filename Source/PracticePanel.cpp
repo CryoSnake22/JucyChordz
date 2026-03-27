@@ -1496,8 +1496,24 @@ void PracticePanel::startMelodyPractice (const juce::String& melodyId)
     practiceType = PracticeType::Melody;
     practicingMelodyId = melodyId;
     challengeCompleted = false;
-    timedPhase = TimedPhase::Inactive;
     previousFramePitchClasses.clear();
+    melodyTimedScored.clear();
+    melodyTimedQualitySum = 0;
+
+    // Timed mode setup
+    if (timedToggle.getToggleState())
+    {
+        if (auto* param = processorRef.apvts.getParameter ("metronomeOn"))
+            param->setValueNotifyingHost (1.0f);
+        processorRef.tempoEngine.resetBeatPosition();
+        processorRef.tempoEngine.markChallengeStart();
+        timedPhase = TimedPhase::CountIn;
+        lastBeatInSequence = -1;
+    }
+    else
+    {
+        timedPhase = TimedPhase::Inactive;
+    }
 
     startButton.setButtonText ("Stop");
     startButton.setColour (juce::TextButton::buttonColourId, juce::Colour (ChordyTheme::dangerMuted));
@@ -1539,7 +1555,10 @@ void PracticePanel::loadMelodyChallenge (int keyIndex)
     melodyNotesCorrect = 0;
     melodyNotesTotal = static_cast<int> (transposedMelody.notes.size());
     previousFramePitchClasses.clear();
+    lastCorrectPC = -1;
     currentBackingChordIndex = -1;
+    melodyTimedScored.clear();
+    melodyTimedQualitySum = 0;
 
     // Set up chart
     practiceMLChart.setVisible (true);
@@ -1641,6 +1660,214 @@ void PracticePanel::advanceMelodyNote()
 
 void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
 {
+    // === TIMED MELODY PRACTICE ===
+    if (timedPhase != TimedPhase::Inactive)
+    {
+        double beatsElapsed = processorRef.tempoEngine.getBeatsSinceChallengeStart();
+        int beatInt = static_cast<int> (std::floor (beatsElapsed));
+
+        // --- Count-in (4 beats) ---
+        if (beatInt < 4)
+        {
+            if (beatInt != lastBeatInSequence)
+            {
+                lastBeatInSequence = beatInt;
+                int countdown = 4 - beatInt;
+                targetLabel.setText (juce::String (countdown) + "...", juce::dontSendNotification);
+                feedbackLabel.setText ("", juce::dontSendNotification);
+
+                if (beatInt >= 2 && ! transposedMelody.notes.empty())
+                {
+                    const auto& firstNote = transposedMelody.notes[0];
+                    int pc = ((melodyKeyRootMidi + firstNote.intervalFromKeyRoot) % 12 + 12) % 12;
+                    juce::String keyName = ChordDetector::noteNameFromPitchClass (transposedMelody.keyPitchClass);
+                    juce::String noteName = ChordDetector::noteNameFromPitchClass (pc);
+                    currentRootText = keyName;
+                    currentRootColour = juce::Colour (ChordyTheme::textPrimary);
+                    targetLabel.setText ("Get ready... " + noteName, juce::dontSendNotification);
+
+                    int targetMidi = melodyKeyRootMidi + firstNote.intervalFromKeyRoot;
+                    keyboardRef.clearAllColours();
+                    if (targetMidi >= 0 && targetMidi < 128)
+                        keyboardRef.setKeyColour (targetMidi, KeyColour::Target);
+                    keyboardRef.repaint();
+                }
+            }
+            return;
+        }
+
+        // --- After count-in: cursor follows beats through the melody ---
+        double progressBeat = beatsElapsed - 4.0;
+        practiceMLChart.setCursorBeat (progressBeat);
+
+        // Find which note should be active at this beat
+        int targetNoteIdx = -1;
+        for (int ni = 0; ni < static_cast<int> (transposedMelody.notes.size()); ++ni)
+        {
+            const auto& n = transposedMelody.notes[static_cast<size_t> (ni)];
+            if (progressBeat >= n.startBeat && progressBeat < n.startBeat + n.durationBeats)
+            {
+                targetNoteIdx = ni;
+                break;
+            }
+        }
+
+        // Melody ended
+        if (progressBeat >= transposedMelody.totalBeats)
+        {
+            // Score any remaining unscored notes as missed
+            for (int ni = 0; ni < static_cast<int> (transposedMelody.notes.size()); ++ni)
+            {
+                if (melodyTimedScored.count (ni) == 0)
+                    practiceMLChart.setNoteState (ni, MelodyChartComponent::NoteState::Missed);
+            }
+
+            int totalNotes = static_cast<int> (transposedMelody.notes.size());
+            int quality = 0;
+            if (totalNotes > 0)
+                quality = juce::jlimit (0, 5,
+                    juce::roundToInt (static_cast<double> (melodyTimedQualitySum) / totalNotes));
+
+            int keyIdx = transposedMelody.keyPitchClass;
+            processorRef.spacedRepetition.recordAttempt (practicingMelodyId, keyIdx, quality);
+            updateStats();
+
+            int scored = static_cast<int> (melodyTimedScored.size());
+            feedbackLabel.setText ("Complete! " + juce::String (scored) + "/" + juce::String (totalNotes) + " notes",
+                                   juce::dontSendNotification);
+            feedbackLabel.setColour (juce::Label::textColourId,
+                quality >= 3 ? juce::Colour (ChordyTheme::success) : juce::Colour (ChordyTheme::danger));
+
+            stopMelodyBacking();
+            practiceMLChart.setCursorBeat (-1.0);
+
+            // Reset for next key
+            processorRef.tempoEngine.resetBeatPosition();
+            processorRef.tempoEngine.markChallengeStart();
+            lastBeatInSequence = -1;
+            melodyTimedScored.clear();
+            melodyTimedQualitySum = 0;
+
+            int nextKey;
+            if (customMode)
+                nextKey = getNextCustomChallenge().keyIndex;
+            else
+                nextKey = processorRef.spacedRepetition.getNextChallenge (practicingMelodyId).keyIndex;
+
+            loadMelodyChallenge (nextKey);
+            return;
+        }
+
+        // Note changed — mark any skipped notes as missed
+        if (targetNoteIdx >= 0 && targetNoteIdx != melodyNoteIndex)
+        {
+            for (int ni = melodyNoteIndex; ni < targetNoteIdx; ++ni)
+            {
+                if (melodyTimedScored.count (ni) == 0)
+                {
+                    melodyTimedScored.insert (ni);
+                    practiceMLChart.setNoteState (ni, MelodyChartComponent::NoteState::Missed);
+                }
+            }
+            melodyNoteIndex = targetNoteIdx;
+            practiceMLChart.setHighlightedNoteIndex (targetNoteIdx);
+
+            juce::String keyName = ChordDetector::noteNameFromPitchClass (transposedMelody.keyPitchClass);
+            const auto& note = transposedMelody.notes[static_cast<size_t> (targetNoteIdx)];
+            int pc = ((melodyKeyRootMidi + note.intervalFromKeyRoot) % 12 + 12) % 12;
+            juce::String noteName = ChordDetector::noteNameFromPitchClass (pc);
+            targetLabel.setText ("Key: " + keyName + " - Play: " + noteName, juce::dontSendNotification);
+
+            if (melodyTimedScored.count (targetNoteIdx) == 0)
+            {
+                feedbackLabel.setText ("GO!", juce::dontSendNotification);
+                feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::successBright));
+                timingFeedbackLabel.setText ("", juce::dontSendNotification);
+            }
+
+            int targetMidi = melodyKeyRootMidi + note.intervalFromKeyRoot;
+            keyboardRef.clearAllColours();
+            if (targetMidi >= 0 && targetMidi < 128)
+                keyboardRef.setKeyColour (targetMidi, KeyColour::Target);
+            keyboardRef.repaint();
+
+            updateMelodyBacking();
+        }
+
+        // Check for new note-ons and score
+        if (targetNoteIdx >= 0 && melodyTimedScored.count (targetNoteIdx) == 0)
+        {
+            std::set<int> currentPCs;
+            for (int n : activeNotes)
+                currentPCs.insert (((n % 12) + 12) % 12);
+
+            std::set<int> newNoteOns;
+            for (int pc : currentPCs)
+                if (previousFramePitchClasses.count (pc) == 0)
+                    newNoteOns.insert (pc);
+
+            previousFramePitchClasses = currentPCs;
+
+            const auto& note = transposedMelody.notes[static_cast<size_t> (targetNoteIdx)];
+            int targetPC = ((melodyKeyRootMidi + note.intervalFromKeyRoot) % 12 + 12) % 12;
+
+            for (int pc : newNoteOns)
+            {
+                if (pc == targetPC)
+                {
+                    melodyTimedScored.insert (targetNoteIdx);
+                    practiceMLChart.setNoteState (targetNoteIdx, MelodyChartComponent::NoteState::Correct);
+
+                    double beatIntoNote = progressBeat - note.startBeat;
+                    int quality = computeQuality (beatIntoNote, false);
+                    melodyTimedQualitySum += quality;
+                    melodyNotesCorrect++;
+
+                    feedbackLabel.setText ("Correct!", juce::dontSendNotification);
+                    feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
+
+                    juce::String qualityText;
+                    juce::Colour qualityColour;
+                    switch (quality)
+                    {
+                        case 5:  qualityText = "Perfect!";  qualityColour = juce::Colour (ChordyTheme::qualityPerfect); break;
+                        case 4:  qualityText = "Good";      qualityColour = juce::Colour (ChordyTheme::qualityGood); break;
+                        case 3:  qualityText = "OK";        qualityColour = juce::Colour (ChordyTheme::qualityOk); break;
+                        case 2:  qualityText = "Slow";      qualityColour = juce::Colour (ChordyTheme::qualitySlow); break;
+                        default: qualityText = "Late";      qualityColour = juce::Colour (ChordyTheme::qualityTimeout); break;
+                    }
+                    timingFeedbackLabel.setText (juce::String (beatIntoNote, 1) + " beats - " + qualityText,
+                                                 juce::dontSendNotification);
+                    timingFeedbackLabel.setColour (juce::Label::textColourId, qualityColour);
+                    updateStats();
+                    break;
+                }
+            }
+
+            // Continuous keyboard refresh
+            keyboardRef.clearAllColours();
+            int targetMidi = melodyKeyRootMidi + note.intervalFromKeyRoot;
+            if (targetMidi >= 0 && targetMidi < 128)
+                keyboardRef.setKeyColour (targetMidi, KeyColour::Target);
+            for (int n : activeNotes)
+            {
+                int pc = ((n % 12) + 12) % 12;
+                if (pc == targetPC)
+                    keyboardRef.setKeyColour (n, KeyColour::Correct);
+            }
+            keyboardRef.repaint();
+        }
+        else
+        {
+            previousFramePitchClasses.clear();
+            for (int n : activeNotes)
+                previousFramePitchClasses.insert (((n % 12) + 12) % 12);
+        }
+
+        return;
+    }
+
+    // === UNTIMED MELODY PRACTICE ===
     if (melodyNoteIndex >= static_cast<int> (transposedMelody.notes.size()))
         return;
 

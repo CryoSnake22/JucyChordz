@@ -130,6 +130,8 @@ private:
     int melodyKeyRootMidi = 60;
     std::set<int> previousFramePitchClasses;
     int lastCorrectPC = -1;  // pitch class of last correctly played note (for green hold)
+    std::set<int> melodyTimedScored;       // note indices already scored in timed mode
+    int melodyTimedQualitySum = 0;         // sum of per-note qualities for averaging
     MelodyChartComponent practiceMLChart;
     juce::ToggleButton backingToggle { "Backing" };
     std::vector<int> backingChordNotes;
