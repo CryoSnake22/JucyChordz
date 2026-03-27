@@ -83,6 +83,13 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
     practiceChart.setVisible (false);
     addAndMakeVisible (practiceChart);
 
+    progDetailedToggle.setToggleState (true, juce::dontSendNotification);
+    progDetailedToggle.onClick = [this] {
+        practiceChart.setDetailedView (progDetailedToggle.getToggleState());
+        resized();
+    };
+    addAndMakeVisible (progDetailedToggle);
+
     practiceMLChart.setVisible (false);
     addAndMakeVisible (practiceMLChart);
 
@@ -108,7 +115,8 @@ void PracticePanel::resized()
     // Show chart for progression/melody practice, target label for voicing practice
     if (practicing && practiceType == PracticeType::Progression)
     {
-        practiceChart.setBounds (area.removeFromTop (70));
+        int progChartH = practiceChart.isDetailedView() ? 180 : 70;
+        practiceChart.setBounds (area.removeFromTop (progChartH));
         area.removeFromTop (4);
         targetLabel.setBounds (area.removeFromTop (24));
     }
@@ -138,7 +146,18 @@ void PracticePanel::resized()
 
     area.removeFromTop (4);
     auto toggleRow = area.removeFromTop (24);
-    timedToggle.setBounds (toggleRow.removeFromLeft (toggleRow.getWidth() / 2));
+    timedToggle.setBounds (toggleRow.removeFromLeft (toggleRow.getWidth() / 3));
+    if (practiceType == PracticeType::Progression)
+    {
+        progDetailedToggle.setBounds (toggleRow.removeFromLeft (toggleRow.getWidth() / 2));
+        progDetailedToggle.setVisible (true);
+        backingToggle.setVisible (false);
+    }
+    else
+    {
+        progDetailedToggle.setVisible (false);
+        backingToggle.setVisible (true);
+    }
     backingToggle.setBounds (toggleRow);
 
     // Key selector (conditionally visible)
@@ -940,12 +959,14 @@ void PracticePanel::onNext()
             {
                 progressionTimedScored.insert (progressionChordIndex);
                 progressionQualitySum += 0;
+                practiceChart.setAllChordNoteStates (progressionChordIndex, ProgressionChartComponent::NoteState::Missed);
             }
             // Don't advance manually — cursor will move with the beat
         }
         else
         {
             // Untimed: skip to next chord, record as miss (don't count as correct)
+            practiceChart.setAllChordNoteStates (progressionChordIndex, ProgressionChartComponent::NoteState::Missed);
             challengeCompleted = false;
             advanceProgressionChord();
         }
@@ -1164,7 +1185,10 @@ void PracticePanel::loadProgressionChallenge (int keyIndex)
     // Set up chart
     practiceChart.setVisible (true);
     practiceChart.setProgressionReadOnly (&transposedProgression);
+    practiceChart.clearNoteStates();
     practiceChart.setSelectedChord (0);
+    practiceChart.setAllChordNoteStates (0, ProgressionChartComponent::NoteState::Target);
+    progressionHasWrongAttempt = false;
 
     // Load first chord's target notes
     const auto& chord = transposedProgression.chords[0];
@@ -1245,6 +1269,7 @@ void PracticePanel::advanceProgressionChord()
     targetNotes = chord.midiNotes;
 
     practiceChart.setSelectedChord (progressionChordIndex);
+    practiceChart.setAllChordNoteStates (progressionChordIndex, ProgressionChartComponent::NoteState::Target);
 
     int keyIndex = (processorRef.progressionLibrary.getProgression (practicingProgressionId)->keyPitchClass
                     + progressionKeyOffset) % 12;
@@ -1322,7 +1347,10 @@ void PracticePanel::updateProgressionPractice (const std::vector<int>& activeNot
             for (int ci = 0; ci < progressionChordsTotal; ++ci)
             {
                 if (progressionTimedScored.count (ci) == 0)
+                {
                     progressionQualitySum += 0; // missed
+                    practiceChart.setAllChordNoteStates (ci, ProgressionChartComponent::NoteState::Missed);
+                }
             }
 
             // Overall quality = average of per-chord qualities, rounded
@@ -1368,14 +1396,16 @@ void PracticePanel::updateProgressionPractice (const std::vector<int>& activeNot
                 {
                     progressionTimedScored.insert (ci);
                     progressionQualitySum += 0; // Q0 timeout
-                    // Don't count as correct
+                    practiceChart.setAllChordNoteStates (ci, ProgressionChartComponent::NoteState::Missed);
                 }
             }
 
             progressionChordIndex = targetChordIdx;
+            progressionHasWrongAttempt = false;
             const auto& chord = transposedProgression.chords[static_cast<size_t> (targetChordIdx)];
             targetNotes = chord.midiNotes;
             practiceChart.setSelectedChord (targetChordIdx);
+            practiceChart.setAllChordNoteStates (targetChordIdx, ProgressionChartComponent::NoteState::Target);
 
             int keyIdx = (processorRef.progressionLibrary.getProgression (practicingProgressionId)->keyPitchClass
                           + progressionKeyOffset) % 12;
@@ -1406,20 +1436,47 @@ void PracticePanel::updateProgressionPractice (const std::vector<int>& activeNot
             for (int n : targetNotes) targetPC.insert (n % 12);
             for (int n : activeNotes) playedPC.insert (n % 12);
 
+            // Update per-note visual states in real-time
+            {
+                const auto& chord = transposedProgression.chords[static_cast<size_t> (targetChordIdx)];
+                for (int ni = 0; ni < static_cast<int> (chord.midiNotes.size()); ++ni)
+                {
+                    int notePC = chord.midiNotes[static_cast<size_t> (ni)] % 12;
+                    if (playedPC.count (notePC) > 0)
+                        practiceChart.setNoteState (targetChordIdx, ni,
+                            ProgressionChartComponent::NoteState::Correct);
+                }
+            }
+
+            // Track wrong notes (extras not in target)
+            for (int pc : playedPC)
+            {
+                if (targetPC.count (pc) == 0)
+                    progressionHasWrongAttempt = true;
+            }
+
             if (playedPC == targetPC)
             {
                 progressionTimedScored.insert (targetChordIdx);
+                // Mark all notes as correct
+                practiceChart.setAllChordNoteStates (targetChordIdx, ProgressionChartComponent::NoteState::Correct);
 
                 const auto& chord = transposedProgression.chords[static_cast<size_t> (targetChordIdx)];
                 double beatIntoChord = progressBeat - chord.startBeat;
                 int quality = computeQuality (beatIntoChord, false);
 
+                // Penalize if wrong notes were played at any point during this chord
+                if (progressionHasWrongAttempt)
+                    quality = juce::jmin (quality, 1);
+
                 progressionQualitySum += quality;
                 if (quality >= 3)
                     progressionChordsCorrect++;
 
-                feedbackLabel.setText ("Correct!", juce::dontSendNotification);
-                feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
+                feedbackLabel.setText (progressionHasWrongAttempt ? "Wrong notes!" : "Correct!",
+                                      juce::dontSendNotification);
+                feedbackLabel.setColour (juce::Label::textColourId,
+                    juce::Colour (progressionHasWrongAttempt ? ChordyTheme::danger : ChordyTheme::success));
 
                 juce::String qualityText;
                 juce::Colour qualityColour;
@@ -1480,9 +1537,22 @@ void PracticePanel::updateProgressionPractice (const std::vector<int>& activeNot
     for (int n : activeNotes)
         playedPitchClasses.insert (n % 12);
 
+    // Per-note visual feedback in real-time (untimed)
+    {
+        const auto& chord = transposedProgression.chords[static_cast<size_t> (progressionChordIndex)];
+        for (int ni = 0; ni < static_cast<int> (chord.midiNotes.size()); ++ni)
+        {
+            int notePC = chord.midiNotes[static_cast<size_t> (ni)] % 12;
+            if (playedPitchClasses.count (notePC) > 0)
+                practiceChart.setNoteState (progressionChordIndex, ni,
+                    ProgressionChartComponent::NoteState::Correct);
+        }
+    }
+
     if (playedPitchClasses == targetPitchClasses)
     {
         challengeCompleted = true;
+        practiceChart.setAllChordNoteStates (progressionChordIndex, ProgressionChartComponent::NoteState::Correct);
         progressionChordsCorrect++;
         feedbackLabel.setText ("Correct!", juce::dontSendNotification);
         feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));

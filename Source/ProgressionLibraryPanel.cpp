@@ -151,6 +151,13 @@ ProgressionLibraryPanel::ProgressionLibraryPanel (AudioPluginAudioProcessor& pro
     };
     addAndMakeVisible (statsChart);
 
+    detailedViewToggle.setToggleState (true, juce::dontSendNotification);
+    detailedViewToggle.onClick = [this] {
+        chartPreview.setDetailedView (detailedViewToggle.getToggleState());
+        resized();
+    };
+    addAndMakeVisible (detailedViewToggle);
+
     // --- Editing ---
     editHeader.setText ("EDIT PROGRESSION", juce::dontSendNotification);
     editHeader.setFont (juce::FontOptions (16.0f, juce::Font::bold));
@@ -344,8 +351,13 @@ void ProgressionLibraryPanel::layoutIdleMode (juce::Rectangle<int> area)
     deleteButton.setBounds (bottomRow);
     area.removeFromBottom (4);
 
-    // Chart preview at bottom
-    auto chartArea = area.removeFromBottom (70);
+    // View toggle + chart preview at bottom
+    auto toggleRow = area.removeFromBottom (22);
+    detailedViewToggle.setBounds (toggleRow.removeFromLeft (90));
+    area.removeFromBottom (2);
+
+    int chartHeight = chartPreview.isDetailedView() ? 180 : 70;
+    auto chartArea = area.removeFromBottom (chartHeight);
     area.removeFromBottom (4);
     chartPreview.setBounds (chartArea);
 
@@ -463,6 +475,7 @@ void ProgressionLibraryPanel::setIdleModeVisible (bool v)
     playButton.setVisible (v);
     editButton.setVisible (v);
     deleteButton.setVisible (v);
+    detailedViewToggle.setVisible (v);
 }
 
 void ProgressionLibraryPanel::setEditModeVisible (bool v)

@@ -114,6 +114,8 @@ private:
     int progressionChordIndex = 0;      // which chord we're on
     int progressionKeyOffset = 0;       // semitones from original key
     ProgressionChartComponent practiceChart;
+    juce::ToggleButton progDetailedToggle { "Detailed" };
+    bool progressionHasWrongAttempt = false;
     double progressionTimedBeat = 0.0;           // current beat in timed progression practice
     std::set<int> progressionTimedScored;         // chord indices already scored this run
     int progressionChordsCorrect = 0;             // chords scored >= Q3

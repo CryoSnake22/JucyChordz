@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "ProgressionModel.h"
+#include <map>
 
 class ProgressionChartComponent : public juce::Component
 {
@@ -17,6 +18,16 @@ public:
     void setQuantizeGrid (double resolution) { quantizeGrid = resolution; }
 
     int getSelectedChord() const { return selectedChordIndex; }
+
+    // Detailed (piano-roll) vs simple (chord names) view
+    void setDetailedView (bool enabled);
+    bool isDetailedView() const { return detailedView; }
+
+    // Per-chord per-note state tracking for practice feedback
+    enum class NoteState { Default, Target, Correct, Missed };
+    void setNoteState (int chordIndex, int noteIndex, NoteState state);
+    void setAllChordNoteStates (int chordIndex, NoteState state);
+    void clearNoteStates();
 
     std::function<void (int chordIndex)> onChordSelected;
     std::function<void()> onChordResized;
@@ -35,7 +46,11 @@ private:
     double cursorBeat = -1.0;
     int selectedChordIndex = -1;
     bool editMode = false;
+    bool detailedView = true;
     double quantizeGrid = 1.0;
+
+    // Per-note states: key = {chordIndex, noteIndexWithinChord}
+    std::map<std::pair<int,int>, NoteState> noteStates;
 
     // Drag state
     enum class DragEdge { None, Left, Right, EndMarker };
@@ -45,12 +60,17 @@ private:
     double dragOrigDuration = 0.0;
 
     static constexpr int beatsPerRow = 16;
-    static constexpr int rowHeight = 30;
+    static constexpr int simpleRowHeight = 30;
     static constexpr int rowGap = 3;
     static constexpr int leftPad = 4;
     static constexpr int rightPad = 4;
     static constexpr float edgeHitZone = 6.0f;
 
+    // Detailed view layout
+    static constexpr int detailedNoteAreaHeight = 100;
+    static constexpr int detailedChordLabelHeight = 18;
+
+    int getEffectiveRowHeight() const;
     float getBeatWidth() const;
     int getRowForBeat (double beat) const;
     juce::Rectangle<float> getChordRect (const ProgressionChord& chord, int row) const;
@@ -58,4 +78,13 @@ private:
     DragEdge hitTestEdge (juce::Point<float> pos, int& outChordIndex) const;
     double xToBeat (float x, int row) const;
     double snapBeat (double beat) const;
+
+    // Detailed view helpers
+    void computePitchRange (int& minMidi, int& maxMidi) const;
+    float midiToY (int midiNote, int minMidi, int maxMidi, int row) const;
+    juce::Rectangle<float> getNoteDetailRect (int midiNote, double startBeat,
+        double durationBeats, int minMidi, int maxMidi, int row) const;
+
+    void paintSimple (juce::Graphics& g, const Progression* prog);
+    void paintDetailed (juce::Graphics& g, const Progression* prog);
 };
