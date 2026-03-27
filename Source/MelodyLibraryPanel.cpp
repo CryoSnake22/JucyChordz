@@ -104,7 +104,11 @@ MelodyLibraryPanel::MelodyLibraryPanel (AudioPluginAudioProcessor& processor)
     melodyList.setRowHeight (36);
     addAndMakeVisible (melodyList);
 
-    addAndMakeVisible (chartPreview);
+    searchEditor.setTextToShowWhenEmpty ("Search...", juce::Colour (ChordyTheme::textTertiary));
+    searchEditor.onTextChange = [this] { updateDisplayedMelodies(); };
+    addAndMakeVisible (searchEditor);
+
+    addChildComponent (chartPreview);
 
     recordButton.onClick = [this] {
         if (panelState == PanelState::Idle)
@@ -305,13 +309,14 @@ void MelodyLibraryPanel::layoutIdleMode (juce::Rectangle<int> area)
     deleteButton.setBounds (bottomRow);
     area.removeFromBottom (4);
 
-    auto chartArea = area.removeFromBottom (80);
-    area.removeFromBottom (4);
-    chartPreview.setBounds (chartArea);
-
     auto statsArea = area.removeFromBottom (60);
     area.removeFromBottom (4);
     statsChart.setBounds (statsArea);
+
+    // Search bar
+    auto searchRow = area.removeFromTop (24);
+    searchEditor.setBounds (searchRow);
+    area.removeFromTop (4);
 
     melodyList.setBounds (area);
 }
@@ -407,8 +412,8 @@ void MelodyLibraryPanel::layoutConfirmMode (juce::Rectangle<int> area)
 void MelodyLibraryPanel::setIdleModeVisible (bool v)
 {
     headerLabel.setVisible (v);
+    searchEditor.setVisible (v);
     melodyList.setVisible (v);
-    chartPreview.setVisible (v);
     statsChart.setVisible (v);
     recordButton.setVisible (v);
     playButton.setVisible (v);
@@ -600,14 +605,11 @@ void MelodyLibraryPanel::updateTimerCallback()
     {
         double beat = processorRef.getMelodyPlaybackBeat();
 
-        if (panelState == PanelState::Idle)
-            chartPreview.setCursorBeat (beat);
-        else if (panelState == PanelState::Editing)
+        if (panelState == PanelState::Editing)
             editChart.setCursorBeat (beat);
     }
     else
     {
-        chartPreview.setCursorBeat (-1.0);
         if (panelState == PanelState::Editing)
             editChart.setCursorBeat (-1.0);
 
@@ -849,7 +851,6 @@ void MelodyLibraryPanel::onDelete()
         processorRef.melodyLibrary.removeMelody (id);
         processorRef.saveLibrariesToDisk();
         melodyList.updateContent();
-        chartPreview.setMelodyReadOnly (nullptr);
         repaint();
     }
 }
@@ -913,6 +914,19 @@ void MelodyLibraryPanel::onEditPlayToggle()
 
 void MelodyLibraryPanel::refresh()
 {
+    updateDisplayedMelodies();
+}
+
+void MelodyLibraryPanel::updateDisplayedMelodies()
+{
+    auto searchText = searchEditor.getText().trim().toLowerCase();
+    const auto& all = processorRef.melodyLibrary.getAllMelodies();
+    displayedMelodies.clear();
+    for (const auto& m : all)
+    {
+        if (searchText.isEmpty() || m.name.toLowerCase().contains (searchText))
+            displayedMelodies.push_back (m);
+    }
     melodyList.updateContent();
     melodyList.repaint();
 }
@@ -920,9 +934,8 @@ void MelodyLibraryPanel::refresh()
 juce::String MelodyLibraryPanel::getSelectedMelodyId() const
 {
     int row = melodyList.getSelectedRow();
-    const auto& all = processorRef.melodyLibrary.getAllMelodies();
-    if (row >= 0 && row < static_cast<int> (all.size()))
-        return all[static_cast<size_t> (row)].id;
+    if (row >= 0 && row < static_cast<int> (displayedMelodies.size()))
+        return displayedMelodies[static_cast<size_t> (row)].id;
     return {};
 }
 
@@ -932,18 +945,17 @@ juce::String MelodyLibraryPanel::getSelectedMelodyId() const
 
 int MelodyLibraryPanel::getNumRows()
 {
-    return processorRef.melodyLibrary.size();
+    return static_cast<int> (displayedMelodies.size());
 }
 
 void MelodyLibraryPanel::paintListBoxItem (int rowNumber, juce::Graphics& g,
                                             int width, int height,
                                             bool rowIsSelected)
 {
-    const auto& all = processorRef.melodyLibrary.getAllMelodies();
-    if (rowNumber < 0 || rowNumber >= static_cast<int> (all.size()))
+    if (rowNumber < 0 || rowNumber >= static_cast<int> (displayedMelodies.size()))
         return;
 
-    const auto& m = all[static_cast<size_t> (rowNumber)];
+    const auto& m = displayedMelodies[static_cast<size_t> (rowNumber)];
 
     if (rowIsSelected)
         g.fillAll (juce::Colour (ChordyTheme::bgSelected));
@@ -978,7 +990,6 @@ void MelodyLibraryPanel::selectedRowsChanged (int)
 {
     auto id = getSelectedMelodyId();
     const auto* mel = processorRef.melodyLibrary.getMelody (id);
-    chartPreview.setMelodyReadOnly (mel);
     refreshStatsChart();
 
     if (onSelectionChanged)

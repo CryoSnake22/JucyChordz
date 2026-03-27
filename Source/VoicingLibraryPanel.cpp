@@ -95,6 +95,10 @@ VoicingLibraryPanel::VoicingLibraryPanel (AudioPluginAudioProcessor& processor)
     qualityFilter.onChange = [this] { updateDisplayedVoicings(); };
     addAndMakeVisible (qualityFilter);
 
+    searchEditor.setTextToShowWhenEmpty ("Search...", juce::Colour (ChordyTheme::textTertiary));
+    searchEditor.onTextChange = [this] { updateDisplayedVoicings(); };
+    addAndMakeVisible (searchEditor);
+
     voicingList.setModel (this);
     // List colors inherited from LookAndFeel
     voicingList.setOutlineThickness (1);
@@ -193,6 +197,7 @@ void VoicingLibraryPanel::paint (juce::Graphics& g)
 void VoicingLibraryPanel::setNormalModeVisible (bool visible)
 {
     headerLabel.setVisible (visible);
+    searchEditor.setVisible (visible);
     qualityFilter.setVisible (visible);
     voicingList.setVisible (visible);
     recordButton.setVisible (visible);
@@ -229,6 +234,10 @@ void VoicingLibraryPanel::layoutNormalMode (juce::Rectangle<int> area)
     auto headerRow = area.removeFromTop (24);
     headerLabel.setBounds (headerRow.removeFromLeft (headerRow.getWidth() / 2));
     recordingIndicator.setBounds (headerRow);
+    area.removeFromTop (4);
+
+    auto searchRow = area.removeFromTop (24);
+    searchEditor.setBounds (searchRow);
     area.removeFromTop (4);
 
     auto filterRow = area.removeFromTop (28);
@@ -387,6 +396,17 @@ void VoicingLibraryPanel::updateDisplayedVoicings()
                 displayedVoicings.push_back (v);
             }
         }
+    }
+
+    // Filter by search text
+    auto searchText = searchEditor.getText().trim().toLowerCase();
+    if (searchText.isNotEmpty())
+    {
+        std::vector<Voicing> filtered;
+        for (const auto& v : displayedVoicings)
+            if (v.name.toLowerCase().contains (searchText))
+                filtered.push_back (v);
+        displayedVoicings = std::move (filtered);
     }
 
     voicingList.updateContent();

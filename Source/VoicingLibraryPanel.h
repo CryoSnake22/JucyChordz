@@ -46,6 +46,7 @@ private:
     // --- Normal mode components ---
     juce::Label headerLabel;
     juce::Label recordingIndicator;
+    juce::TextEditor searchEditor;
     juce::ComboBox qualityFilter;
     juce::ListBox voicingList;
     juce::TextButton recordButton { "Record" };

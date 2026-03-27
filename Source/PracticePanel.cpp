@@ -80,8 +80,10 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
     timingFeedbackLabel.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (timingFeedbackLabel);
 
-    practiceChart.setVisible (false);
-    addAndMakeVisible (practiceChart);
+    practiceChartViewport.setViewedComponent (&practiceChart, false);
+    practiceChartViewport.setScrollBarsShown (true, false);
+    practiceChartViewport.setVisible (false);
+    addAndMakeVisible (practiceChartViewport);
 
     progDetailedToggle.setToggleState (true, juce::dontSendNotification);
     progDetailedToggle.onClick = [this] {
@@ -109,43 +111,39 @@ void PracticePanel::resized()
 {
     auto area = getLocalBounds().reduced (ChordyTheme::panelPadding);
 
-    headerLabel.setBounds (area.removeFromTop (24));
-    area.removeFromTop (4);
+    // Layout bottom-up: fixed controls at bottom, chart fills remaining top
+    statsLabel.setBounds (area.removeFromBottom (24));
+    area.removeFromBottom (2);
+    timingFeedbackLabel.setBounds (area.removeFromBottom (20));
+    area.removeFromBottom (2);
+    feedbackLabel.setBounds (area.removeFromBottom (24));
+    area.removeFromBottom (4);
 
-    // Show chart for progression/melody practice, target label for voicing practice
-    if (practicing && practiceType == PracticeType::Progression)
+    // Key selector (conditionally visible)
+    if (showingKeySelector)
     {
-        int progChartH = practiceChart.isDetailedView() ? 180 : 70;
-        practiceChart.setBounds (area.removeFromTop (progChartH));
-        area.removeFromTop (4);
-        targetLabel.setBounds (area.removeFromTop (24));
-    }
-    else if (practicing && practiceType == PracticeType::Melody)
-    {
-        practiceMLChart.setBounds (area.removeFromTop (100));
-        area.removeFromTop (4);
-        targetLabel.setBounds (area.removeFromTop (24));
-    }
-    else
-    {
-        practiceChart.setBounds (0, 0, 0, 0); // hidden
-        practiceMLChart.setBounds (0, 0, 0, 0);
-        targetLabel.setBounds (area.removeFromTop (36));
-    }
-    area.removeFromTop (4);
+        auto controlRow = area.removeFromBottom (24);
+        selectAllButton.setBounds (controlRow.removeFromLeft (40));
+        controlRow.removeFromLeft (4);
+        deselectAllButton.setBounds (controlRow.removeFromLeft (45));
+        controlRow.removeFromLeft (8);
+        orderCombo.setBounds (controlRow);
+        area.removeFromBottom (2);
 
-    auto buttonRow = area.removeFromTop (30);
-    int buttonWidth = (buttonRow.getWidth() - 12) / 4;
-    startButton.setBounds (buttonRow.removeFromLeft (buttonWidth));
-    buttonRow.removeFromLeft (4);
-    nextButton.setBounds (buttonRow.removeFromLeft (buttonWidth));
-    buttonRow.removeFromLeft (4);
-    playButton.setBounds (buttonRow.removeFromLeft (buttonWidth));
-    buttonRow.removeFromLeft (4);
-    customButton.setBounds (buttonRow);
+        auto keyRow2 = area.removeFromBottom (22);
+        int kw = keyRow2.getWidth() / 6;
+        for (int i = 6; i < 12; ++i)
+            keyToggles[i].setBounds (keyRow2.removeFromLeft (kw));
+        area.removeFromBottom (2);
 
-    area.removeFromTop (4);
-    auto toggleRow = area.removeFromTop (24);
+        auto keyRow1 = area.removeFromBottom (22);
+        for (int i = 0; i < 6; ++i)
+            keyToggles[i].setBounds (keyRow1.removeFromLeft (kw));
+        area.removeFromBottom (4);
+    }
+
+    // Toggle row
+    auto toggleRow = area.removeFromBottom (24);
     timedToggle.setBounds (toggleRow.removeFromLeft (toggleRow.getWidth() / 3));
     if (practiceType == PracticeType::Progression)
     {
@@ -159,39 +157,54 @@ void PracticePanel::resized()
         backingToggle.setVisible (true);
     }
     backingToggle.setBounds (toggleRow);
+    area.removeFromBottom (4);
 
-    // Key selector (conditionally visible)
-    if (showingKeySelector)
-    {
-        area.removeFromTop (4);
-        // Row 1: C through F (6 keys)
-        auto keyRow1 = area.removeFromTop (22);
-        int kw = keyRow1.getWidth() / 6;
-        for (int i = 0; i < 6; ++i)
-            keyToggles[i].setBounds (keyRow1.removeFromLeft (kw));
+    // Button row
+    auto buttonRow = area.removeFromBottom (30);
+    int buttonWidth = (buttonRow.getWidth() - 12) / 4;
+    startButton.setBounds (buttonRow.removeFromLeft (buttonWidth));
+    buttonRow.removeFromLeft (4);
+    nextButton.setBounds (buttonRow.removeFromLeft (buttonWidth));
+    buttonRow.removeFromLeft (4);
+    playButton.setBounds (buttonRow.removeFromLeft (buttonWidth));
+    buttonRow.removeFromLeft (4);
+    customButton.setBounds (buttonRow);
+    area.removeFromBottom (4);
 
-        area.removeFromTop (2);
-        // Row 2: Gb through B (6 keys)
-        auto keyRow2 = area.removeFromTop (22);
-        for (int i = 6; i < 12; ++i)
-            keyToggles[i].setBounds (keyRow2.removeFromLeft (kw));
+    // Target label
+    targetLabel.setBounds (area.removeFromBottom (24));
+    area.removeFromBottom (4);
 
-        area.removeFromTop (2);
-        // [All] [None] [Order combo]
-        auto controlRow = area.removeFromTop (24);
-        selectAllButton.setBounds (controlRow.removeFromLeft (40));
-        controlRow.removeFromLeft (4);
-        deselectAllButton.setBounds (controlRow.removeFromLeft (45));
-        controlRow.removeFromLeft (8);
-        orderCombo.setBounds (controlRow);
-    }
-
-    area.removeFromTop (8);
-    feedbackLabel.setBounds (area.removeFromTop (24));
-    area.removeFromTop (2);
-    timingFeedbackLabel.setBounds (area.removeFromTop (20));
+    // Header
+    headerLabel.setBounds (area.removeFromTop (24));
     area.removeFromTop (4);
-    statsLabel.setBounds (area.removeFromTop (24));
+
+    // Chart fills ALL remaining space — always visible
+    bool showProgChart = (practicing && practiceType == PracticeType::Progression) || showingProgPreview;
+    bool showMelChart = (practicing && practiceType == PracticeType::Melody) || showingMelPreview;
+
+    if (showProgChart)
+    {
+        practiceChartViewport.setBounds (area);
+        int idealH = juce::jmax (1, practiceChart.getIdealHeight());
+        int scrollbarW = (idealH > area.getHeight()) ? 10 : 0;
+        practiceChart.setBounds (0, 0, area.getWidth() - scrollbarW, idealH);
+        practiceChartViewport.setVisible (true);
+        practiceMLChart.setBounds (0, 0, 0, 0);
+    }
+    else if (showMelChart)
+    {
+        practiceMLChart.setBounds (area);
+        practiceMLChart.setVisible (true);
+        practiceChartViewport.setBounds (0, 0, 0, 0);
+        practiceChartViewport.setVisible (false);
+    }
+    else
+    {
+        practiceChartViewport.setBounds (0, 0, 0, 0);
+        practiceChartViewport.setVisible (false);
+        practiceMLChart.setBounds (0, 0, 0, 0);
+    }
 }
 
 // --- Selection ---
@@ -462,7 +475,7 @@ void PracticePanel::stopPractice()
     practicingProgressionId = {};
     practicingMelodyId = {};
     progressionChordIndex = 0;
-    practiceChart.setVisible (false);
+    practiceChartViewport.setVisible (false);
     practiceChart.setProgressionReadOnly (nullptr);
     practiceMLChart.setVisible (false);
     practiceMLChart.setMelodyReadOnly (nullptr);
@@ -496,6 +509,67 @@ void PracticePanel::stopPractice()
 
     // Persist SR data changes from this practice session
     processorRef.saveLibrariesToDisk();
+}
+
+// --- Chart preview (non-practice) ---
+
+void PracticePanel::showProgressionPreview (const Progression* prog)
+{
+    showingMelPreview = false;
+    if (prog == nullptr)
+    {
+        showingProgPreview = false;
+        practiceChart.setProgressionReadOnly (nullptr);
+    }
+    else
+    {
+        previewProgression = *prog;
+        showingProgPreview = true;
+        practiceChart.setProgressionReadOnly (&previewProgression);
+        practiceChart.clearNoteStates();
+    }
+    resized();
+    repaint();
+}
+
+void PracticePanel::showMelodyPreview (const Melody* mel)
+{
+    showingProgPreview = false;
+    if (mel == nullptr)
+    {
+        showingMelPreview = false;
+        practiceMLChart.setMelodyReadOnly (nullptr);
+    }
+    else
+    {
+        previewMelody = *mel;
+        showingMelPreview = true;
+        practiceMLChart.setMelodyReadOnly (&previewMelody);
+    }
+    resized();
+    repaint();
+}
+
+void PracticePanel::clearChartPreview()
+{
+    showingProgPreview = false;
+    showingMelPreview = false;
+    practiceChart.setProgressionReadOnly (nullptr);
+    practiceMLChart.setMelodyReadOnly (nullptr);
+    resized();
+    repaint();
+}
+
+void PracticePanel::showProgressionCursor (double beat)
+{
+    if (showingProgPreview)
+        practiceChart.setCursorBeat (beat);
+}
+
+void PracticePanel::showMelodyCursor (double beat)
+{
+    if (showingMelPreview)
+        practiceMLChart.setCursorBeat (beat);
 }
 
 // --- Practice update (called from 60Hz timer) ---
@@ -1183,7 +1257,7 @@ void PracticePanel::loadProgressionChallenge (int keyIndex)
     progressionQualitySum = 0;
 
     // Set up chart
-    practiceChart.setVisible (true);
+    practiceChartViewport.setVisible (true);
     practiceChart.setProgressionReadOnly (&transposedProgression);
     practiceChart.clearNoteStates();
     practiceChart.setSelectedChord (0);

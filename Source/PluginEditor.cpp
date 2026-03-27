@@ -84,8 +84,12 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
 
   // Progression selection → practice panel
   progressionLibraryPanel.onSelectionChanged = [this](const juce::String& progressionId) {
-    if (progressionId.isNotEmpty() && libraryTabs.getCurrentTabIndex() == 1)
+    if (libraryTabs.getCurrentTabIndex() == 1)
+    {
       practicePanel.setSelectedProgressionId(progressionId);
+      const auto* prog = processorRef.progressionLibrary.getProgression(progressionId);
+      practicePanel.showProgressionPreview(prog);
+    }
   };
 
   // Tabbed library panel
@@ -93,8 +97,12 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
   libraryTabs.addTab("Progressions", juce::Colour(ChordyTheme::bgSurface), &progressionLibraryPanel, false);
   // Melody selection → practice panel
   melodyLibraryPanel.onSelectionChanged = [this](const juce::String& melodyId) {
-    if (melodyId.isNotEmpty() && libraryTabs.getCurrentTabIndex() == 2)
+    if (libraryTabs.getCurrentTabIndex() == 2)
+    {
       practicePanel.setSelectedMelodyId(melodyId);
+      const auto* mel = processorRef.melodyLibrary.getMelody(melodyId);
+      practicePanel.showMelodyPreview(mel);
+    }
   };
 
   // Melody note preview → highlight keyboard
@@ -394,6 +402,18 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
     keyboard.repaint();
   }
 
+  // Update preview chart cursor during playback (non-practice)
+  if (!practicePanel.isPracticing()) {
+    if (processorRef.isPlayingProgression())
+      practicePanel.showProgressionCursor(processorRef.getPlaybackBeatPosition());
+    else if (processorRef.isPlayingMelody())
+      practicePanel.showMelodyCursor(processorRef.getMelodyPlaybackBeat());
+    else {
+      practicePanel.showProgressionCursor(-1.0);
+      practicePanel.showMelodyCursor(-1.0);
+    }
+  }
+
   // Update practice mode
   if (practicePanel.isPracticing()) {
     practicePanel.updatePractice(notes);
@@ -428,26 +448,22 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
     keyboard.repaint();
 
     if (currentTab == 0) {
-      // Switched to Voicings — update practice panel from voicing selection
+      // Switched to Voicings — no chart preview
       auto vid = voicingLibraryPanel.getSelectedVoicingId();
-      if (vid.isNotEmpty())
-        practicePanel.setSelectedVoicingId(vid);
-      else
-        practicePanel.setSelectedVoicingId({});
+      practicePanel.setSelectedVoicingId(vid);
+      practicePanel.clearChartPreview();
     } else if (currentTab == 1) {
-      // Switched to Progressions — update practice panel from progression selection
+      // Switched to Progressions — show chart preview
       auto pid = progressionLibraryPanel.getSelectedProgressionId();
-      if (pid.isNotEmpty())
-        practicePanel.setSelectedProgressionId(pid);
-      else
-        practicePanel.setSelectedProgressionId({});
+      practicePanel.setSelectedProgressionId(pid);
+      const auto* prog = processorRef.progressionLibrary.getProgression(pid);
+      practicePanel.showProgressionPreview(prog);
     } else if (currentTab == 2) {
-      // Switched to Melodies — update practice panel from melody selection
+      // Switched to Melodies — show chart preview
       auto mid = melodyLibraryPanel.getSelectedMelodyId();
-      if (mid.isNotEmpty())
-        practicePanel.setSelectedMelodyId(mid);
-      else
-        practicePanel.setSelectedMelodyId({});
+      practicePanel.setSelectedMelodyId(mid);
+      const auto* mel = processorRef.melodyLibrary.getMelody(mid);
+      practicePanel.showMelodyPreview(mel);
     }
   }
 

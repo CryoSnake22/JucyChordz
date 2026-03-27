@@ -45,15 +45,18 @@ private:
     // --- Idle mode components ---
     juce::Label headerLabel;
     juce::Label recordingIndicator;
+    juce::TextEditor searchEditor;
     juce::ListBox progressionList;
-    ProgressionChartComponent chartPreview;
     juce::TextButton recordButton { "Record" };
     juce::TextButton playButton { "Play" };
     juce::TextButton editButton { "Edit" };
     juce::TextButton deleteButton { "Delete" };
     VoicingStatsChart statsChart;
     int statsPlayingKey = -1;
-    juce::ToggleButton detailedViewToggle { "Detailed" };
+
+    // Filtered display list
+    std::vector<Progression> displayedProgressions;
+    void updateDisplayedProgressions();
 
     // --- Count-in state ---
     int countInBeatsElapsed = 0;

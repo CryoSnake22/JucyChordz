@@ -41,6 +41,7 @@ private:
     // --- Idle mode ---
     juce::Label headerLabel;
     juce::Label recordingIndicator;
+    juce::TextEditor searchEditor;
     juce::ListBox melodyList;
     MelodyChartComponent chartPreview;
     juce::TextButton recordButton { "Record" };
@@ -91,6 +92,10 @@ private:
     Melody pendingMelody;
     double currentQuantizeResolution = 0.5;
     int analysisKeyRootMidi = 60;   // C4 as default reference for analysis
+
+    // Filtered display list
+    std::vector<Melody> displayedMelodies;
+    void updateDisplayedMelodies();
 
     // Note preview (timer-based note-off)
     std::vector<int> notePreviewNotes;

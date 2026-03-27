@@ -86,20 +86,12 @@ ProgressionLibraryPanel::ProgressionLibraryPanel (AudioPluginAudioProcessor& pro
 
     progressionList.setModel (this);
     progressionList.setOutlineThickness (1);
+    progressionList.setRowHeight (36);
     addAndMakeVisible (progressionList);
 
-    chartPreview.onChordSelected = [this](int idx) {
-        auto id = getSelectedProgressionId();
-        const auto* prog = processorRef.progressionLibrary.getProgression (id);
-        if (prog != nullptr && idx >= 0 && idx < static_cast<int> (prog->chords.size()))
-        {
-            const auto& chord = prog->chords[static_cast<size_t> (idx)];
-            playChordPreview (chord);
-            if (onChordPreview)
-                onChordPreview (chord.midiNotes);
-        }
-    };
-    addAndMakeVisible (chartPreview);
+    searchEditor.setTextToShowWhenEmpty ("Search...", juce::Colour (ChordyTheme::textTertiary));
+    searchEditor.onTextChange = [this] { updateDisplayedProgressions(); };
+    addAndMakeVisible (searchEditor);
 
     recordButton.onClick = [this] {
         if (panelState == PanelState::Idle)
@@ -150,13 +142,6 @@ ProgressionLibraryPanel::ProgressionLibraryPanel (AudioPluginAudioProcessor& pro
         statsPlayingKey = keyIndex;
     };
     addAndMakeVisible (statsChart);
-
-    detailedViewToggle.setToggleState (true, juce::dontSendNotification);
-    detailedViewToggle.onClick = [this] {
-        chartPreview.setDetailedView (detailedViewToggle.getToggleState());
-        resized();
-    };
-    addAndMakeVisible (detailedViewToggle);
 
     // --- Editing ---
     editHeader.setText ("EDIT PROGRESSION", juce::dontSendNotification);
@@ -351,21 +336,17 @@ void ProgressionLibraryPanel::layoutIdleMode (juce::Rectangle<int> area)
     deleteButton.setBounds (bottomRow);
     area.removeFromBottom (4);
 
-    // View toggle + chart preview at bottom
-    auto toggleRow = area.removeFromBottom (22);
-    detailedViewToggle.setBounds (toggleRow.removeFromLeft (90));
-    area.removeFromBottom (2);
-
-    int chartHeight = chartPreview.isDetailedView() ? 180 : 70;
-    auto chartArea = area.removeFromBottom (chartHeight);
-    area.removeFromBottom (4);
-    chartPreview.setBounds (chartArea);
-
-    // Stats chart between list and chart preview
+    // Stats chart
     auto statsArea = area.removeFromBottom (60);
     area.removeFromBottom (4);
     statsChart.setBounds (statsArea);
 
+    // Search bar
+    auto searchRow = area.removeFromTop (24);
+    searchEditor.setBounds (searchRow);
+    area.removeFromTop (4);
+
+    // List fills remaining space
     progressionList.setBounds (area);
 }
 
@@ -468,14 +449,13 @@ void ProgressionLibraryPanel::layoutConfirmMode (juce::Rectangle<int> area)
 void ProgressionLibraryPanel::setIdleModeVisible (bool v)
 {
     headerLabel.setVisible (v);
+    searchEditor.setVisible (v);
     progressionList.setVisible (v);
-    chartPreview.setVisible (v);
     statsChart.setVisible (v);
     recordButton.setVisible (v);
     playButton.setVisible (v);
     editButton.setVisible (v);
     deleteButton.setVisible (v);
-    detailedViewToggle.setVisible (v);
 }
 
 void ProgressionLibraryPanel::setEditModeVisible (bool v)
@@ -692,15 +672,11 @@ void ProgressionLibraryPanel::updateTimerCallback()
     {
         double beat = processorRef.getPlaybackBeatPosition();
 
-        if (panelState == PanelState::Idle)
-            chartPreview.setCursorBeat (beat);
-        else if (panelState == PanelState::Editing)
+        if (panelState == PanelState::Editing)
             editChart.setCursorBeat (beat);
     }
     else
     {
-        // Clear cursor if playback just stopped
-        chartPreview.setCursorBeat (-1.0);
         if (panelState == PanelState::Editing)
             editChart.setCursorBeat (-1.0);
 
@@ -904,7 +880,7 @@ void ProgressionLibraryPanel::onDelete()
         processorRef.progressionLibrary.removeProgression (id);
         processorRef.saveLibrariesToDisk();
         progressionList.updateContent();
-        chartPreview.setProgressionReadOnly (nullptr);
+        // (chart preview now lives in practice panel)
         repaint();
     }
 }
@@ -979,17 +955,29 @@ void ProgressionLibraryPanel::onEditPlayToggle()
 
 void ProgressionLibraryPanel::refresh()
 {
-    progressionList.updateContent();
-    progressionList.repaint();
+    updateDisplayedProgressions();
 }
 
 juce::String ProgressionLibraryPanel::getSelectedProgressionId() const
 {
     int row = progressionList.getSelectedRow();
-    const auto& all = processorRef.progressionLibrary.getAllProgressions();
-    if (row >= 0 && row < static_cast<int> (all.size()))
-        return all[static_cast<size_t> (row)].id;
+    if (row >= 0 && row < static_cast<int> (displayedProgressions.size()))
+        return displayedProgressions[static_cast<size_t> (row)].id;
     return {};
+}
+
+void ProgressionLibraryPanel::updateDisplayedProgressions()
+{
+    auto searchText = searchEditor.getText().trim().toLowerCase();
+    const auto& all = processorRef.progressionLibrary.getAllProgressions();
+    displayedProgressions.clear();
+    for (const auto& p : all)
+    {
+        if (searchText.isEmpty() || p.name.toLowerCase().contains (searchText))
+            displayedProgressions.push_back (p);
+    }
+    progressionList.updateContent();
+    progressionList.repaint();
 }
 
 //==============================================================================
@@ -998,18 +986,17 @@ juce::String ProgressionLibraryPanel::getSelectedProgressionId() const
 
 int ProgressionLibraryPanel::getNumRows()
 {
-    return processorRef.progressionLibrary.size();
+    return static_cast<int> (displayedProgressions.size());
 }
 
 void ProgressionLibraryPanel::paintListBoxItem (int rowNumber, juce::Graphics& g,
                                                  int width, int height,
                                                  bool rowIsSelected)
 {
-    const auto& all = processorRef.progressionLibrary.getAllProgressions();
-    if (rowNumber < 0 || rowNumber >= static_cast<int> (all.size()))
+    if (rowNumber < 0 || rowNumber >= static_cast<int> (displayedProgressions.size()))
         return;
 
-    const auto& p = all[static_cast<size_t> (rowNumber)];
+    const auto& p = displayedProgressions[static_cast<size_t> (rowNumber)];
 
     if (rowIsSelected)
         g.fillAll (juce::Colour (ChordyTheme::bgSelected));
@@ -1040,8 +1027,6 @@ void ProgressionLibraryPanel::refreshStatsChart()
 void ProgressionLibraryPanel::selectedRowsChanged (int)
 {
     auto id = getSelectedProgressionId();
-    const auto* prog = processorRef.progressionLibrary.getProgression (id);
-    chartPreview.setProgressionReadOnly (prog);
     refreshStatsChart();
 
     if (onSelectionChanged)

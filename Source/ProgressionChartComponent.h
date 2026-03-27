@@ -18,6 +18,7 @@ public:
     void setQuantizeGrid (double resolution) { quantizeGrid = resolution; }
 
     int getSelectedChord() const { return selectedChordIndex; }
+    int getIdealHeight() const;
 
     // Detailed (piano-roll) vs simple (chord names) view
     void setDetailedView (bool enabled);
@@ -68,7 +69,7 @@ private:
 
     // Detailed view layout
     static constexpr int detailedNoteAreaHeight = 100;
-    static constexpr int detailedChordLabelHeight = 18;
+    static constexpr int detailedChordLabelHeight = 22;
 
     int getEffectiveRowHeight() const;
     float getBeatWidth() const;

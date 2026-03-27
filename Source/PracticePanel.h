@@ -52,6 +52,13 @@ public:
     void setSelectedProgressionId (const juce::String& id);
     void setSelectedMelodyId (const juce::String& id);
 
+    // Show chart preview for selected item (even when not practicing)
+    void showProgressionPreview (const Progression* prog);
+    void showMelodyPreview (const Melody* mel);
+    void clearChartPreview();
+    void showProgressionCursor (double beat);
+    void showMelodyCursor (double beat);
+
 private:
     juce::String selectedVoicingId;
     juce::String selectedProgressionId;
@@ -108,12 +115,19 @@ private:
     double playPhaseStartBeatFraction = 0.0; // fractional beat position when play phase started
     PracticeChallenge nextChallenge;    // pre-fetched for prep display
 
+    // Chart preview data (stored here so pointers stay valid)
+    Progression previewProgression;
+    Melody previewMelody;
+    bool showingProgPreview = false;
+    bool showingMelPreview = false;
+
     // --- Progression practice state ---
     juce::String practicingProgressionId;
     Progression transposedProgression;  // current key's transposition
     int progressionChordIndex = 0;      // which chord we're on
     int progressionKeyOffset = 0;       // semitones from original key
     ProgressionChartComponent practiceChart;
+    juce::Viewport practiceChartViewport;
     juce::ToggleButton progDetailedToggle { "Detailed" };
     bool progressionHasWrongAttempt = false;
     double progressionTimedBeat = 0.0;           // current beat in timed progression practice
