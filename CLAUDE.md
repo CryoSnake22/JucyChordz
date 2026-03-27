@@ -35,7 +35,7 @@ JUCE is included as a **git submodule** at `./JUCE/` via `add_subdirectory(JUCE)
 | File | Purpose |
 |---|---|
 | `PluginProcessor.h/.cpp` | Audio/MIDI processing hub. Owns `MidiKeyboardState`, APVTS, `VoicingLibrary`, `ProgressionLibrary`, `MelodyLibrary`, `ExternalInstrument`, `ProgressionRecorder`, `SpacedRepetitionEngine`, `TempoEngine`, `ChordySynth`. Lock-free note sharing via atomic bitfield + per-note velocity tracking (`noteVelocities[128]`). Preview MIDI injection via SpinLock+MidiBuffer. Progression and melody playback engines replay raw MIDI directly (sample-accurate, preserves velocity + pedal + all CC events). Instrument routing: internal synth OR external hosted plugin, controlled by `synthEnabled` parameter. |
-| `PluginEditor.h/.cpp` | Top-level GUI. Hosts keyboard, chord display, tabbed library panel (Voicings/Progressions/Melodies), practice panel. 60Hz timer drives chord detection, recording, practice, playback cursor, beat indicator, voicing preview, and live stats refresh. Tab-change detection clears selections. Tempo bar includes instrument mode selector (Internal/External ComboBox), plugin selector (Standalone only), Scan button, Open button for hosted plugin editor, and volume slider. |
+| `PluginEditor.h/.cpp` | Top-level GUI. Hosts keyboard, chord display (center: always shows detected chord; left overlay: practice key + countdown), tabbed library panel (Voicings/Progressions/Melodies), practice panel. 60Hz timer drives chord detection, recording, practice, playback cursor, beat indicator, voicing preview, live stats refresh, clicked-chord display, and library button enable/disable. Collapsible tempo bar via "Settings"/"Hide Settings" toggle. Tab-change detection clears selections AND stops practice. External instrument controls (plugin selector, Scan, Open) visible when settings expanded + External mode selected. |
 | `ExternalInstrument.h/.cpp` | VST3/AU plugin hosting for Standalone mode. Uses `AudioPluginFormatManager` (VST3 + AU formats), `KnownPluginList`, `PluginDirectoryScanner`. Background scanning with dead-mans-pedal crash protection. Async plugin loading via `createPluginInstanceAsync` (JUCE-recommended pattern). Bus layout negotiation (stereo preferred, falls back gracefully). Channel-safe `processBlock` with scratch buffer for mismatched layouts. CriticalSection for plugin swap (ScopedTryLock on audio thread). Loading dead-mans-pedal (`loadingPlugin.txt`) protects against SIGSEGV during plugin init. Plugin list cached to `~/Library/Application Support/Chordy/pluginList.xml`. Instruments deduplicated by name (VST3 preferred over AU). Plugin state persisted in session via XML + base64 blob (async restore). Hosted plugin's editor opens in a separate `DocumentWindow`. |
 | `ChordyTheme.h` | Header-only constants namespace -- all colors, font sizes, spacing, corner radii, chart colors. Every visual value lives here. |
 | `ChordyLookAndFeel.h/.cpp` | Custom `LookAndFeel_V4` subclass. Flat rounded buttons, pill toggles, thin-track sliders, underline tabs. Avenir Next font. |
@@ -46,16 +46,16 @@ JUCE is included as a **git submodule** at `./JUCE/` via `add_subdirectory(JUCE)
 | `ChordyKeyboardComponent.h/.cpp` | `MidiKeyboardComponent` subclass with colored key overlays (green=correct, red=wrong, teal=target). |
 | `VoicingModel.h/.cpp` | `Voicing` struct (id, name, quality, alterations, rootPitchClass, intervals, velocities, octaveReference) + `VoicingLibrary` class with ValueTree serialization and `findByNotes()`. `createFromNotes()` accepts optional velocity vector. |
 | `SpacedRepetition.h/.cpp` | SM-2 spaced repetition engine. Per-voicing/progression/melody per-key records. Generic item ID + keyIndex tracking. |
-| `VoicingStatsChart.h/.cpp` | 12-bar chart (C-B) showing per-key accuracy. Used by voicing, progression, and melody panels. |
-| `VoicingLibraryPanel.h/.cpp` | Voicing recording panel with 4-state flow (Idle->Waiting->Capturing->Confirming). Captures per-note velocities during recording via processor's `noteVelocities` array. |
-| `ProgressionModel.h/.cpp` | `ProgressionChord` struct (intervals, root, quality, alterations, name, linkedVoicingId, startBeat, durationBeats, midiNotes, midiVelocities) + `Progression` struct (id, name, key, mode, chords, totalBeats, bpm, timeSig, rawMidi) + `ProgressionLibrary` class. `transposeProgression()` shifts notes by semitones, regenerates chord names including slash notation, preserves voice leading. ValueTree serialization including raw MIDI as compact string. |
-| `ProgressionRecorder.h/.cpp` | MIDI recording with beat-relative timestamps (sample counting + BPM). Records note-on/off AND sustain pedal (CC64) events. `analyzeChordChanges()` detects chord boundaries from MIDI -- only triggers on note-ON events (releasing notes does NOT create intermediate chords). `quantize()` snaps to beat/half-beat/quarter-beat grid. `injectEvent()` for pre-held notes. Also reused by MelodyLibraryPanel for melody recording. |
-| `ProgressionChartComponent.h/.cpp` | Lead-sheet chord chart renderer. Chords as rounded rects on a beat grid with bar lines, row wrapping (4 bars/row). Edit mode: click to select, drag edges to resize (snaps to quantize grid), draggable end marker (amber triangle). Cursor support for playback/practice. |
-| `ProgressionLibraryPanel.h/.cpp` | Progression management panel with 6-state machine (Idle->CountIn->Recording->Editing->Confirming). 4-beat count-in synced to metronome. Quantize picker (Raw/Beat/1/2/1/4). Raw re-analyzes from original MIDI with no grid snapping. Transpose +1/-1 buttons. Chord editing (name, root, quality). Delete chord button. Play/Stop playback. Stats bar chart. Click chord to hear+highlight. |
-| `MelodyModel.h/.cpp` | `MelodyNote` struct (intervalFromKeyRoot, startBeat, durationBeats, velocity) + `MelodyChordContext` struct (intervalFromKeyRoot, quality, alterations, startBeat, durationBeats) + `Melody` struct (id, name, keyPitchClass, chordContexts, notes, totalBeats, bpm, timeSig, rawMidi) + `MelodyLibrary` class. `transposeMelody()` shifts keyPitchClass, regenerates names. `analyzeMelodyNotes()` converts raw MIDI to interval-based notes. `quantizeMelodyNotes()` always re-analyzes from original recording (non-destructive). ValueTree serialization. |
-| `MelodyChartComponent.h/.cpp` | Note-name-on-beat-grid renderer. Notes as rounded rects with pitch on Y axis, beat on X axis. Chord context bar along bottom of each row. Row wrapping (8 beats/row). Note states: Default (grey), Target (amber outline), Correct (green), Missed (red). Edit mode: click notes, click/drag chord context edges. Cursor support for playback/practice. |
-| `MelodyLibraryPanel.h/.cpp` | Melody management panel with 5-state machine (Idle->CountIn->Recording->Editing->Confirming). Reuses ProgressionRecorder for MIDI capture. Chord context editor in editing state (add/remove/edit chords on timeline with root+quality combos). Quantize picker (Raw/Beat/1/2/1/4) -- Raw keeps exact recorded timing. Quantize always re-analyzes from original (non-destructive). Play/Stop via melody playback engine. |
-| `PracticePanel.h/.cpp` | Practice GUI supporting voicing, progression, and melody practice. Voicing practice: timed (4-beat cycle) and untimed. Progression practice: chart with moving cursor, per-chord scoring, key transposition. Melody practice: sequential note-by-note pitch-class matching (timed and untimed), melody chart with note states, chord backing pad (toggleable). Custom key selection. Play button (hear answer), Next button (skip + record miss). Backing toggle plays chord context as sustained pad underneath during melody practice. Start button blocked when nothing is selected for current tab. |
+| `VoicingStatsChart.h/.cpp` | Interactive 12-bar chart (C-B) showing per-key accuracy. Click a bar to play the selected item in that key (`onKeyClicked` callback). Hover highlighting, playing-key amber outline (`setPlayingKey`). Used by voicing, progression, and melody panels. |
+| `VoicingLibraryPanel.h/.cpp` | Voicing recording panel with 4-state flow (Idle->Waiting->Capturing->Confirming). Captures per-note velocities during recording via processor's `noteVelocities` array. Search bar filters by name. `onKeyPreview` callback for stats chart key playback. `onRecordStarted` callback clears keyboard + stops playback. `setButtonsEnabled(bool)` for disabling during practice. |
+| `ProgressionModel.h/.cpp` | `ProgressionChord` struct (intervals, root, quality, alterations, name, linkedVoicingId, startBeat, durationBeats, midiNotes, midiVelocities) + `Progression` struct (id, name, key, mode, chords, totalBeats, bpm, timeSig, rawMidi) + `ProgressionLibrary` class. `transposeProgression()` shifts notes AND rawMidi by semitones, regenerates chord names including slash notation, preserves voice leading. ValueTree serialization including raw MIDI as compact string. |
+| `ProgressionRecorder.h/.cpp` | MIDI recording with beat-relative timestamps (sample counting + BPM). Records note-on/off AND sustain pedal (CC64) events. `analyzeChordChanges()` detects chord boundaries from MIDI -- only triggers on note-ON events (releasing notes does NOT create intermediate chords). **Chord accumulation**: adding a note to an already-held chord extends the current chord rather than creating a new one. Only creates a new chord when all previous notes are released first. `quantize()` snaps to beat/half-beat/quarter-beat grid. `injectEvent()` for pre-held notes. Also reused by MelodyLibraryPanel for melody recording. |
+| `ProgressionChartComponent.h/.cpp` | Dual-mode chart: **Detailed (default)** = piano-roll view with individual MIDI notes per chord, per-note NoteState (Default/Target/Correct/Missed) for practice feedback, dynamic row height via `setViewportHeight()`. **Simple** = chord names as rects. Toggle via `setDetailedView()`. Edit mode forces simple view. Row wrapping (16 beats/row), bar lines, cursor, selected chord highlight. Click chord to select. `getIdealHeight()` for viewport sizing. |
+| `ProgressionLibraryPanel.h/.cpp` | Progression management panel with 6-state machine (Idle->CountIn->Recording->Editing->Confirming). 4-beat count-in synced to metronome. Quantize picker (Raw/Beat/1/2/1/4). Raw re-analyzes from original MIDI with no grid snapping. Transpose +1/-1 buttons. Chord editing (name, root, quality). Delete chord button. Play/Stop playback. Stats bar chart with click-to-play-in-key. Search bar filters by name (`displayedProgressions` filtered list). `onTransposedPreview` callback updates practice panel chart when playing in another key. Chart preview removed from this panel (lives in practice panel now). |
+| `MelodyModel.h/.cpp` | `MelodyNote` struct (intervalFromKeyRoot, startBeat, durationBeats, velocity) + `MelodyChordContext` struct (intervalFromKeyRoot, quality, alterations, startBeat, durationBeats) + `Melody` struct (id, name, keyPitchClass, chordContexts, notes, totalBeats, bpm, timeSig, rawMidi) + `MelodyLibrary` class. `transposeMelody()` shifts keyPitchClass AND rawMidi note events, regenerates names. `analyzeMelodyNotes()` converts raw MIDI to interval-based notes. `quantizeMelodyNotes()` always re-analyzes from original recording (non-destructive). ValueTree serialization. |
+| `MelodyChartComponent.h/.cpp` | Note-on-beat-grid renderer with dynamic viewport height support (`setViewportHeight()`, `getIdealHeight()`, `getNoteAreaHeight()`). Notes as lightly rounded rects (2px radius) with pitch on Y axis, beat on X axis. Dynamic note height (one semitone per step, capped at 16px). Chord context bar along bottom of each row. Row wrapping (8 beats/row). Note states: Default (grey), Target (amber outline), Correct (green), Missed (red). Edit mode: click notes, click/drag chord context edges. Cursor support for playback/practice. |
+| `MelodyLibraryPanel.h/.cpp` | Melody management panel with 5-state machine (Idle->CountIn->Recording->Editing->Confirming). Reuses ProgressionRecorder for MIDI capture. Chord context editor in editing state (add/remove/edit chords on timeline with root+quality combos). Quantize picker (Raw/Beat/1/2/1/4) -- Raw keeps exact recorded timing. Quantize always re-analyzes from original (non-destructive). Play/Stop via melody playback engine. Search bar filters by name (`displayedMelodies` filtered list). `onTransposedPreview` callback. Chart preview removed from idle layout (lives in practice panel). |
+| `PracticePanel.h/.cpp` | Practice GUI supporting voicing, progression, and melody practice. **Chart always visible at top** (not just during practice) — shows preview of selected progression/melody. Both charts wrapped in `juce::Viewport` with dynamic viewport height (one row fills available space, scroll for more). Layout is bottom-up: controls at bottom, chart fills remaining space. Voicing practice: timed (4-beat cycle) and untimed. Progression practice: detailed chart with per-note NoteState (Correct/Missed per individual note within each chord), wrong-note penalization (extra notes cap quality at Q1), Detailed/Simple toggle. Melody practice: sequential note-by-note pitch-class matching (timed and untimed), melody chart with note states, chord backing pad (root-position stacked thirds from `getChordTones()`, toggleable). Play button plays current target note/chord (not whole melody). Click chord/note in preview to hear + highlight keyboard + show name in top display. `showProgressionPreview()`/`showMelodyPreview()`/`clearChartPreview()` for non-practice preview. Countdown shown via `countdownText` (displayed on left of chord area by editor). `clickedChordName` with timed auto-clear for chord/note click display. `onStartStop()` stops any active playback before starting practice. Square corners (no rounded rect). |
 | `PlaceholderPanel.h` | Header-only placeholder (no longer used for Melodies tab). |
 
 ### MIDI Data Flow
@@ -98,7 +98,7 @@ On stop, both engines send pedal-off (CC64=0) before note-offs to prevent stuck 
 - **Plugin editor**: Opens in a separate `DocumentWindow` (always-on-top, closeable, resizable) via "Open" button in tempo bar. Editor window closed automatically when loading a new plugin (prevents dangling pointer).
 - **State persistence**: Plugin description XML + plugin state as base64 blob, saved as ValueTree child of APVTS state. Restore is async via `createPluginInstanceAsync` with try/catch around `setStateInformation` + `prepareToPlay`.
 - **Loading dead-mans-pedal**: Before loading any plugin, its name is written to `~/Library/Application Support/Chordy/loadingPlugin.txt`. Cleared on success or caught failure. If a SIGSEGV crashes the host, the file survives -- on next startup, `restoreFromStateXml` detects it and skips the crashy plugin. User can retry via the UI dropdown.
-- **Files cached at**: `~/Library/Application Support/Chordy/` -- `pluginList.xml` (scan cache), `deadMansPedal.txt` (scan crashes), `loadingPlugin.txt` (load crashes).
+- **Files cached at**: `~/Library/Application Support/Chordy/` -- `pluginList.xml` (scan cache), `deadMansPedal.txt` (scan crashes), `loadingPlugin.txt` (load crashes), `libraries.xml` (shared voicing/progression/melody/SR data for DAW-Standalone sync).
 
 ### GUI Layout (1100x740)
 
@@ -106,30 +106,36 @@ On stop, both engines send pedal-off (CC64=0) before note-offs to prevent stuck 
 +-----------------------------------------------------+
 | CHORDY                                              | 40px header
 +-----------------------------------------------------+
-|              Db                                     | 52px big root display
-|         Up next...  E                               | 28px next root preview
+| Key: Eb    [chord detection always centered]        | 52px chord display
+| [countdown]  [Up next: G]                           | 28px sub-labels (overlaid left)
 +-----------------------------------------------------+
 | === ChordyKeyboardComponent (keyWidth=28) ========= | 140px keyboard (C2-C7)
 +-----------------------------------------------------+
-| BPM:[slider] [Click][Sync] [Internal v] [Plugin v]  | 36px tempo bar
-| [Scan][Open] [Vol slider] [beat dots]               |
+| [Settings/Hide] BPM:[slider] [Click][Sync] ...     | 36px tempo bar (collapsible)
 +----------------------+------------------------------+
-| [Voicings|Prog|Mel]  | Practice: Voicing/Prog/Melody |
-| List (voicings or    | [Chart if progression/melody] |
+| [Voicings|Prog|Mel]  | [Chart preview / practice]   |
+| [Search bar]         | (always visible, fills space) |
+| List (voicings or    | [target label]                |
 |   progs or melodies) | [Start|Next|Play|Custom]      |
-| ==== Stats chart ====| [x Timed] [x Backing]         |
-| [Chart preview]      | [Key selector if custom]      |
-| [Record][Play]       | Feedback + timing + accuracy   |
-| [Edit][Delete]       |                                |
+| ==== Stats chart ====| [x Timed] [x Detailed/Backing]|
+| [Record][Play]       | [Key selector if custom]      |
+| [Edit][Delete]       | Feedback + timing + accuracy   |
 +----------------------+------------------------------+
 ```
 
-Tempo bar controls:
-- **Instrument mode combo**: "Internal" (default) / "External"
-- **Plugin selector**: Only visible in Standalone + External mode. Populated from scanned VST3/AU instruments.
-- **Scan button**: Triggers background plugin scan. Only visible in Standalone + External mode.
+Chord display area:
+- **Center**: Always shows chord detection (from keyboard or playback or clicked preview). Never blocked by practice.
+- **Left overlay**: "Key: X" during practice (36pt amber). Countdown below it (18pt tertiary, disappears after count-in).
+- **Next root**: "Up next: G" below chord display during practice.
+
+Tempo bar controls (collapsible via Settings toggle):
+- **Settings toggle**: "Hide Settings" when expanded (95px), "Settings" when collapsed (70px). Collapsed hides all controls except beat indicator.
+- **Instrument mode combo**: "Internal" (default) / "External". Visible in both DAW and Standalone.
+- **Plugin selector**: Visible when settings expanded + External mode. Populated from scanned VST3/AU instruments.
+- **Scan button**: Triggers background plugin scan. Visible when settings expanded + External mode.
 - **Open button**: Opens hosted plugin's editor window. Only visible when a plugin is loaded.
-- **Volume slider**: Controls output volume for both internal synth and hosted plugin.
+- **Volume slider**: Controls output volume for both internal synth and hosted plugin (3x gain boost applied to external instruments).
+- **Metronome volume slider**: Separate volume for metronome click.
 
 ### Recording Features
 
@@ -169,7 +175,7 @@ Progression-specific:
 **Melody struct:**
 - `id` (UUID), `name`, `keyPitchClass` (0-11), `chordContexts` (vector), `notes` (vector), `totalBeats`, `bpm`, `timeSignatureNum/Den`, `rawMidi` (MidiMessageSequence)
 
-**Serialization:** VoicingLibrary, ProgressionLibrary, MelodyLibrary, SpacedRepetition state, and ExternalInstrument state all serialized as ValueTree/XML children of APVTS state. Raw MIDI stored as compact "time:byte1:byte2:byte3;..." string. Velocities stored as comma-separated int strings.
+**Serialization:** VoicingLibrary, ProgressionLibrary, MelodyLibrary, SpacedRepetition state, and ExternalInstrument state all serialized as ValueTree/XML children of APVTS state. Raw MIDI stored as compact "time:byte1:byte2:byte3;..." string. Velocities stored as comma-separated int strings. **Shared library file**: Libraries also saved to `~/Library/Application Support/Chordy/libraries.xml` for syncing between DAW and Standalone instances. Loaded on construction, saved on every library modification, practice stop, and plugin destruction.
 
 ## Adding Source Files
 
@@ -196,6 +202,7 @@ All new `.cpp`/`.h` files **must** be added to the `SOURCE_FILES` variable in `C
 | `responseWindowBeats` | Float | 1-8 | 4 | Beats before timeout |
 | `synthEnabled` | Bool | -- | true | true=internal synth, false=external instrument |
 | `synthVolume` | Float | 0-1 | 0.7 | Output volume (applies to both internal and external) |
+| `metronomeVolume` | Float | 0-1 | 0.7 | Metronome click volume |
 
 ## Theming System
 
@@ -206,7 +213,9 @@ All visual styling centralized -- **never hardcode hex colors or font sizes**.
 - **Font**: Avenir Next via `setDefaultSansSerifTypefaceName()`. Requires `setDefaultLookAndFeel()`.
 - **Palette**: Warm charcoal + amber accent. Green=correct, red=danger/missed, teal=target/preview, amber=accent/cursor.
 - **Keyboard overlay colors**: `keyCorrect` (green, semi-transparent), `keyWrong` (red, semi-transparent), `keyTarget` (light teal). Browsing/preview/playback highlights use teal (`KeyColour::Target`). Green (`KeyColour::Correct`) is reserved for correct answers during practice only.
-- **Melody chart note colors**: Default=neutral grey, Target=amber outline, Correct=green fill, Missed=red fill.
+- **Chart note colors** (both progression and melody): Default=neutral grey (`melodyNoteBg`), Target=amber outline (`accent`), Correct=green fill (`melodyNoteCorrect`), Missed=red fill (`melodyNoteMissed`). Notes have 2px rounding. Dynamic height = noteAreaHeight / pitchRange, capped at 16px. Note names always shown (8pt font) if height > 7px. Chord labels hidden when width < 10px.
+- **Chart backgrounds**: Note area uses `bgSurface` (blends with card). Chord label bar uses `melodyChordBg` (flat, no rounding). Bar lines at 0.4f alpha. No rounded rect on note area background.
+- **UI consistency standards**: All list item names at 14pt, secondary text at 11pt. Row height 36px. Stats chart 60px. Delete buttons use `dangerMuted`. Practice panel has square corners.
 - **Avoid UTF-8 special characters** in displayed strings (em-dashes, arrows). JUCE's font rendering may not handle them. Use plain ASCII alternatives (-, >, etc.).
 
 ## Key Development Notes
@@ -215,19 +224,30 @@ All visual styling centralized -- **never hardcode hex colors or font sizes**.
 - Preview MIDI path (`addPreviewMidi`) bypasses `keyboardState` entirely -- no keyboard flash, no interference with practice note detection. Used for voicing preview, chord preview, Play button, playback note-offs, melody backing pad.
 - Both playback engines (progression + melody) replay raw MIDI directly from `rawMidi` MidiMessageSequence. This preserves velocity, pedal, all CC events exactly as recorded. No chord/note reconstruction during playback.
 - `ProgressionRecorder.recording` is `std::atomic<bool>` for audio thread safety. Reused for melody recording (no separate MelodyRecorder). Records note-on/off AND CC64 (sustain pedal).
-- Chord analysis (`analyzeChordChanges`) only triggers new chords on note-ON events. Note releases close the current chord but do NOT create intermediate chords from remaining held notes.
+- Chord analysis (`analyzeChordChanges`) only triggers new chords on note-ON events. Note releases close the current chord but do NOT create intermediate chords from remaining held notes. **Chord accumulation**: adding a note while previous notes are still held extends the current chord (uses `std::includes` to detect superset), not a new chord boundary.
 - Per-note velocities tracked via `noteVelocities[128]` atomic array in processor, updated from MIDI input each processBlock. Used by VoicingLibraryPanel to capture velocities during voicing recording.
 - Tab-change detection in editor timer clears stale selections and updates practice panel type.
 - Practice panel's `setSelectedVoicingId` / `setSelectedProgressionId` / `setSelectedMelodyId` each clear the other IDs and set `practiceType` to prevent stale state.
 - Both melody and progression quantize always re-analyze from raw MIDI (non-destructive). Switching between Raw/Beat/1/2/1/4 never destroys the original recording.
 - Melody note intervals stored as `intervalFromKeyRoot` -- transposition shifts `keyPitchClass`, intervals stay the same. Chord context intervals also relative to key root.
 - Melody practice keyboard coloring: must refresh every frame (like voicing practice's `updateKeyboardColours`). Track `lastCorrectPC` so held correct notes stay green after target advances. Without continuous refresh, JUCE's default key-down color (orange/yellow) shows through.
-- Start button is blocked when nothing is selected for the current practice type.
+- Start button is blocked when nothing is selected for current practice type. Shows "Press Start" when item is selected (not the long "Select a voicing..." message).
+- **Tab switching stops practice**: `practicePanel.stopPractice()` called on tab change. Also stops playback.
+- **Library buttons disabled during practice**: All Record/Play/Edit/Delete buttons grayed out via `setButtonsEnabled(false)` driven by 60Hz timer.
+- **Record clears state**: Pressing Record fires `onRecordStarted` callback which clears keyboard highlighting and stops all playback.
+- **Keyboard highlighting is persistent**: Clicking a chord/voicing/note highlights keys and they stay highlighted even when user plays other notes. Cleared only on: tab switch, selection change, practice start, or record start.
+- **Clicked chord display**: `PracticePanel.clickedChordName` with frame-based auto-clear shows chord/note names in the center display when clicking items in preview. Timer-ticked from editor.
+- **Transposed preview**: Stats chart key-click fires `onTransposedPreview` callback to update the practice panel chart to the transposed version, so clicking chords in the transposed preview plays correct notes.
+- **TempoEngine reset is deferred**: `resetBeatPosition()` sets a `pendingReset` atomic flag; actual reset happens at start of next `process()` to avoid cutting off mid-render metronome clicks. Also resets `challengeStartBeatPosition` to prevent negative beat counts.
+- **Melody backing pad uses root-position stacked thirds**: Chord tones from `getChordTones()` placed with root in C3-F#3 range, intervals stacking upward. No octave scrambling.
 - External instrument hosting: `addDefaultFormats()` is deleted in JUCE headless builds -- must register formats manually via `new VST3PluginFormat()` / `new AudioUnitPluginFormat()`.
 - **Plugin hosting must use `createPluginInstanceAsync`** (not `Thread::launch` + synchronous `createPluginInstance`). Complex plugins like Keyscape need message thread access during initialization. The old background-thread approach caused crashes. Follow the JUCE `HostPluginDemo` pattern: async load, callback on message thread, CriticalSection (not SpinLock), bus layout negotiation, `setRateAndBufferSizeDetails` before `prepareToPlay`.
 - **Bus layout negotiation is essential** before calling a hosted plugin's `processBlock`. The AudioBuffer channel count must exactly match what the plugin expects. Use `setupPluginBuses()` after loading and a scratch buffer in `processBlock` for mismatches.
 - Loading dead-mans-pedal (`loadingPlugin.txt`) protects against signal-level crashes (SIGSEGV) that try/catch cannot catch. Written before load, cleared on success. Checked on restore to skip crashy plugins.
 - **Playback should always use raw MIDI replay by default.** Only reconstruct from analyzed data when transposition requires it (e.g., practice mode transposing to different keys). Raw replay preserves velocity, pedal, timing nuance exactly.
 - **When a UI behavior works in one mode but not another**, diff the two working code paths side-by-side before writing a fix. The answer is always in what the working version does differently.
+- **External instrument hosting works in both DAW and Standalone** (no longer standalone-only). 3x gain boost applied to external instrument output to match internal synth levels.
+- **`SpacedRepetitionEngine::getNextChallenge` accepts `avoidKey` parameter** to prevent repeating the same root note consecutively. Custom mode shuffle also avoids boundary repeats.
+- **Progression practice wrong-note penalization**: Extra notes played that aren't in the target chord set `hasWrongAttempt = true`, capping quality at Q1. Only exact pitch-class match (no extras) counts as correct.
 - No test infrastructure exists yet
 - Planned future features: MIDI file import, comping rhythm templates
