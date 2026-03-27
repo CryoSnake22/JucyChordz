@@ -5,7 +5,8 @@
       "Bash(cmake --build cmake-build)",
       "Bash(cmake -B cmake-build)",
       "Bash(make build:*)",
-      "mcp__context7__resolve-library-id"
+      "mcp__context7__resolve-library-id",
+      "WebSearch"
     ]
   }
 }
