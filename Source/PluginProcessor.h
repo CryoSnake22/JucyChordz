@@ -115,6 +115,7 @@ private:
   int playbackChordIndex = -1;
   std::vector<int> playbackActiveNotes;
   double playbackSamplePos = 0.0;
+  int playbackCCIndex = 0;  // tracks which CC events from rawMidi have been sent
   juce::SpinLock previewMidiLock;
   juce::MidiBuffer previewMidiBuffer;
   mutable std::mutex lastPlayedNotesMutex;
@@ -128,6 +129,7 @@ private:
   int melodyPlaybackNoteIndex = -1;
   int melodyPlaybackActiveNote = -1;
   double melodyPlaybackSamplePos = 0.0;
+  int melodyPlaybackCCIndex = 0;  // tracks which CC events from rawMidi have been sent
 
   static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 

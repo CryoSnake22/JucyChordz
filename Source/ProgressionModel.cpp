@@ -85,6 +85,7 @@ static const juce::Identifier ID_linkedVoicingId ("linkedVoicingId");
 static const juce::Identifier ID_startBeat ("startBeat");
 static const juce::Identifier ID_durationBeats ("durationBeats");
 static const juce::Identifier ID_midiNotes ("midiNotes");
+static const juce::Identifier ID_midiVelocities ("midiVelocities");
 static const juce::Identifier ID_rawMidi ("rawMidi");
 
 static juce::String intsToString (const std::vector<int>& v)
@@ -164,6 +165,7 @@ juce::ValueTree ProgressionLibrary::chordToValueTree (const ProgressionChord& c)
     tree.setProperty (ID_startBeat, c.startBeat, nullptr);
     tree.setProperty (ID_durationBeats, c.durationBeats, nullptr);
     tree.setProperty (ID_midiNotes, intsToString (c.midiNotes), nullptr);
+    tree.setProperty (ID_midiVelocities, intsToString (c.midiVelocities), nullptr);
     return tree;
 }
 
@@ -179,6 +181,7 @@ ProgressionChord ProgressionLibrary::chordFromValueTree (const juce::ValueTree& 
     c.startBeat = tree.getProperty (ID_startBeat, 0.0);
     c.durationBeats = tree.getProperty (ID_durationBeats, 4.0);
     c.midiNotes = stringToInts (tree.getProperty (ID_midiNotes).toString());
+    c.midiVelocities = stringToInts (tree.getProperty (ID_midiVelocities).toString());
     return c;
 }
 

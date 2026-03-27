@@ -231,8 +231,12 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
 
         if (targetChord >= 0) {
           const auto& c = playbackProgression.chords[static_cast<size_t>(targetChord)];
-          for (int n : c.midiNotes) {
-            midiMessages.addEvent(juce::MidiMessage::noteOn(midiCh, n, 0.7f), s);
+          for (size_t ni = 0; ni < c.midiNotes.size(); ++ni) {
+            int n = c.midiNotes[ni];
+            float vel = (ni < c.midiVelocities.size())
+                ? static_cast<float>(c.midiVelocities[ni]) / 127.0f
+                : 0.7f;
+            midiMessages.addEvent(juce::MidiMessage::noteOn(midiCh, n, vel), s);
             playbackActiveNotes.push_back(n);
           }
         }
@@ -245,6 +249,17 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
         }
         playbackNotesLow.store(pLow, std::memory_order_relaxed);
         playbackNotesHigh.store(pHigh, std::memory_order_relaxed);
+      }
+
+      // Inject CC events (pedal, etc.) from rawMidi at the correct beat positions
+      while (playbackCCIndex < playbackProgression.rawMidi.getNumEvents())
+      {
+        auto* evt = playbackProgression.rawMidi.getEventPointer(playbackCCIndex);
+        if (evt->message.getTimeStamp() > beat)
+          break;
+        if (evt->message.isController())
+          midiMessages.addEvent(evt->message, s);
+        playbackCCIndex++;
       }
 
       playbackSamplePos += 1.0;
@@ -311,6 +326,17 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
         }
         playbackNotesLow.store(pLow, std::memory_order_relaxed);
         playbackNotesHigh.store(pHigh, std::memory_order_relaxed);
+      }
+
+      // Inject CC events (pedal, etc.) from rawMidi at the correct beat positions
+      while (melodyPlaybackCCIndex < melodyPlaybackData.rawMidi.getNumEvents())
+      {
+        auto* evt = melodyPlaybackData.rawMidi.getEventPointer(melodyPlaybackCCIndex);
+        if (evt->message.getTimeStamp() > beat)
+          break;
+        if (evt->message.isController())
+          midiMessages.addEvent(evt->message, s);
+        melodyPlaybackCCIndex++;
       }
 
       melodyPlaybackSamplePos += 1.0;
@@ -446,6 +472,7 @@ void AudioPluginAudioProcessor::startProgressionPlayback (const Progression& pro
   playbackChordIndex = -1;
   playbackActiveNotes.clear();
   playbackSamplePos = 0.0;
+  playbackCCIndex = 0;
   playbackBeat.store(0.0, std::memory_order_relaxed);
 
   // Sync to metronome: turn it on and reset beat position to 0
@@ -460,6 +487,8 @@ void AudioPluginAudioProcessor::stopProgressionPlayback() {
   if (playbackActive.load(std::memory_order_relaxed)) {
     playbackActive.store(false, std::memory_order_relaxed);
     int ch = static_cast<int>(*apvts.getRawParameterValue("midiChannel"));
+    // Release pedal first, then notes
+    addPreviewMidi(juce::MidiMessage::controllerEvent(ch, 64, 0));
     for (int n : playbackActiveNotes)
       addPreviewMidi(juce::MidiMessage::noteOff(ch, n));
     playbackActiveNotes.clear();
@@ -479,6 +508,7 @@ void AudioPluginAudioProcessor::startMelodyPlayback (const Melody& melody, int k
   melodyPlaybackNoteIndex = -1;
   melodyPlaybackActiveNote = -1;
   melodyPlaybackSamplePos = 0.0;
+  melodyPlaybackCCIndex = 0;
   melodyPlaybackBeat.store(0.0, std::memory_order_relaxed);
   melodyPlaybackActive.store(true, std::memory_order_relaxed);
 }
@@ -487,6 +517,7 @@ void AudioPluginAudioProcessor::stopMelodyPlayback() {
   if (melodyPlaybackActive.load(std::memory_order_relaxed)) {
     melodyPlaybackActive.store(false, std::memory_order_relaxed);
     int ch = static_cast<int>(*apvts.getRawParameterValue("midiChannel"));
+    addPreviewMidi(juce::MidiMessage::controllerEvent(ch, 64, 0));
     if (melodyPlaybackActiveNote >= 0)
       addPreviewMidi(juce::MidiMessage::noteOff(ch, melodyPlaybackActiveNote));
     melodyPlaybackActiveNote = -1;

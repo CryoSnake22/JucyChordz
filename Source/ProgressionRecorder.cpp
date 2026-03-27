@@ -2,6 +2,7 @@
 #include "ChordDetector.h"
 #include <algorithm>
 #include <cmath>
+#include <map>
 
 //==============================================================================
 // Recording
@@ -43,8 +44,8 @@ void ProgressionRecorder::processBlock (const juce::MidiBuffer& midi, int numSam
     {
         auto msg = meta.getMessage();
 
-        // Only record note-on and note-off events
-        if (! msg.isNoteOnOrOff())
+        // Record note-on, note-off, and sustain pedal (CC64) events
+        if (! msg.isNoteOnOrOff() && ! msg.isSustainPedalOn() && ! msg.isSustainPedalOff())
             continue;
 
         // Compute beat-relative timestamp
@@ -73,7 +74,7 @@ std::vector<ProgressionChord> ProgressionRecorder::analyzeChordChanges (
         return chords;
 
     // Walk through events tracking which notes are currently held
-    std::set<int> activeNotes;
+    std::map<int, int> activeNotes;  // note number -> velocity
     std::set<int> lastChordNotes;
     double chordStartBeat = 0.0;
 
@@ -83,18 +84,42 @@ std::vector<ProgressionChord> ProgressionRecorder::analyzeChordChanges (
         auto& msg = evt->message;
         double beatTime = msg.getTimeStamp();
 
-        if (msg.isNoteOn() && msg.getVelocity() > 0)
+        // Skip pedal events for chord analysis (they're preserved in rawMidi)
+        if (msg.isController())
+            continue;
+
+        bool isNoteOn = msg.isNoteOn() && msg.getVelocity() > 0;
+
+        if (isNoteOn)
         {
-            activeNotes.insert (msg.getNoteNumber());
+            activeNotes[msg.getNoteNumber()] = msg.getVelocity();
         }
         else if (msg.isNoteOff() || (msg.isNoteOn() && msg.getVelocity() == 0))
         {
             activeNotes.erase (msg.getNoteNumber());
         }
 
-        // Detect chord change: active note set differs from last chord
-        // Only trigger when we have notes and they've changed
-        if (! activeNotes.empty() && activeNotes != lastChordNotes)
+        // Build current note set for comparison
+        std::set<int> currentNoteSet;
+        for (const auto& pair : activeNotes)
+            currentNoteSet.insert (pair.first);
+
+        // Only detect chord changes on note-ON events (not releases).
+        // Releasing notes from a chord should NOT create intermediate chords.
+        if (! isNoteOn)
+        {
+            // When all notes release, close the current chord
+            if (currentNoteSet.empty() && ! lastChordNotes.empty())
+            {
+                if (! chords.empty())
+                    chords.back().durationBeats = beatTime - chordStartBeat;
+                lastChordNotes.clear();
+            }
+            continue;
+        }
+
+        // Detect chord change: a new note-on changed the active set
+        if (! currentNoteSet.empty() && currentNoteSet != lastChordNotes)
         {
             // If we had a previous chord, close it out
             if (! lastChordNotes.empty() && ! chords.empty())
@@ -102,12 +127,26 @@ std::vector<ProgressionChord> ProgressionRecorder::analyzeChordChanges (
                 chords.back().durationBeats = beatTime - chordStartBeat;
             }
 
-            // Build the new chord
-            std::vector<int> noteVec (activeNotes.begin(), activeNotes.end());
-            std::sort (noteVec.begin(), noteVec.end());
+            // Build the new chord with velocities
+            std::vector<int> noteVec;
+            std::vector<int> velVec;
+            for (const auto& pair : activeNotes)
+            {
+                noteVec.push_back (pair.first);
+                velVec.push_back (pair.second);
+            }
+            // Sort by note number, keeping velocities parallel
+            for (size_t a = 0; a + 1 < noteVec.size(); ++a)
+                for (size_t b = a + 1; b < noteVec.size(); ++b)
+                    if (noteVec[a] > noteVec[b])
+                    {
+                        std::swap (noteVec[a], noteVec[b]);
+                        std::swap (velVec[a], velVec[b]);
+                    }
 
             ProgressionChord chord;
             chord.midiNotes = noteVec;
+            chord.midiVelocities = velVec;
             chord.startBeat = beatTime;
             chord.durationBeats = 0.0; // will be set when next chord starts or at end
 
@@ -149,17 +188,8 @@ std::vector<ProgressionChord> ProgressionRecorder::analyzeChordChanges (
             }
 
             chords.push_back (chord);
-            lastChordNotes = activeNotes;
+            lastChordNotes = currentNoteSet;
             chordStartBeat = beatTime;
-        }
-
-        // When all notes release, mark the end but don't start a new chord
-        if (activeNotes.empty() && ! lastChordNotes.empty())
-        {
-            if (! chords.empty())
-                chords.back().durationBeats = beatTime - chordStartBeat;
-
-            lastChordNotes.clear();
         }
     }
 
