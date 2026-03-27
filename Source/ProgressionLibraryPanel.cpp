@@ -142,6 +142,8 @@ ProgressionLibraryPanel::ProgressionLibraryPanel (AudioPluginAudioProcessor& pro
         playButton.setButtonText ("Stop");
         statsChart.setPlayingKey (keyIndex);
         statsPlayingKey = keyIndex;
+        if (onTransposedPreview)
+            onTransposedPreview (transposed);
     };
     addAndMakeVisible (statsChart);
 

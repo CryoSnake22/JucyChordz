@@ -26,6 +26,7 @@ public:
 
     std::function<void (const juce::String& melodyId)> onSelectionChanged;
     std::function<void (const std::vector<int>& midiNotes)> onNotePreview;
+    std::function<void (const Melody& transposed)> onTransposedPreview;
 
 private:
     int getNumRows() override;

@@ -92,6 +92,11 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
     }
   };
 
+  // Stats chart transposed playback → update preview to transposed version
+  progressionLibraryPanel.onTransposedPreview = [this](const Progression& transposed) {
+    practicePanel.showProgressionPreview(&transposed);
+  };
+
   // Tabbed library panel
   libraryTabs.addTab("Voicings", juce::Colour(ChordyTheme::bgSurface), &voicingLibraryPanel, false);
   libraryTabs.addTab("Progressions", juce::Colour(ChordyTheme::bgSurface), &progressionLibraryPanel, false);
@@ -103,6 +108,10 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
       const auto* mel = processorRef.melodyLibrary.getMelody(melodyId);
       practicePanel.showMelodyPreview(mel);
     }
+  };
+
+  melodyLibraryPanel.onTransposedPreview = [this](const Melody& transposed) {
+    practicePanel.showMelodyPreview(&transposed);
   };
 
   // Melody note preview → highlight keyboard
@@ -189,7 +198,7 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
     if (idx >= 0 && idx < instruments.size())
       processorRef.externalInstrument.loadPlugin(instruments[idx]);
   };
-  pluginSelector.setVisible(false);
+  pluginSelector.setVisible(*processorRef.apvts.getRawParameterValue("synthEnabled") <= 0.5f);
   addAndMakeVisible(pluginSelector);
 
   // Edit plugin button (opens hosted plugin's own GUI)
@@ -347,15 +356,39 @@ void AudioPluginAudioProcessorEditor::resized() {
   }
   else
   {
+    bool isExternal = *processorRef.apvts.getRawParameterValue("synthEnabled") <= 0.5f;
+
     bpmLabel.setVisible(false);
     bpmSlider.setVisible(false);
     metronomeToggle.setVisible(false);
     metronomeVolumeSlider.setVisible(false);
     hostSyncToggle.setVisible(false);
-    instrumentModeCombo.setVisible(false);
-    pluginSelector.setVisible(false);
-    rescanButton.setVisible(false);
-    editPluginButton.setVisible(false);
+    instrumentModeCombo.setVisible(true);  // always show mode selector
+    instrumentModeCombo.setBounds(tempoArea.removeFromLeft(100));
+    tempoArea.removeFromLeft(4);
+
+    if (isExternal)
+    {
+      pluginSelector.setVisible(true);
+      pluginSelector.setBounds(tempoArea.removeFromLeft(140));
+      tempoArea.removeFromLeft(4);
+      rescanButton.setVisible(true);
+      rescanButton.setBounds(tempoArea.removeFromLeft(40));
+      tempoArea.removeFromLeft(4);
+      editPluginButton.setVisible(processorRef.externalInstrument.isPluginLoaded());
+      if (editPluginButton.isVisible())
+      {
+        editPluginButton.setBounds(tempoArea.removeFromLeft(55));
+        tempoArea.removeFromLeft(4);
+      }
+    }
+    else
+    {
+      pluginSelector.setVisible(false);
+      rescanButton.setVisible(false);
+      editPluginButton.setVisible(false);
+    }
+
     synthVolumeSlider.setVisible(false);
   }
   beatIndicator.setBounds(tempoArea);

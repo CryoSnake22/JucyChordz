@@ -92,18 +92,22 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
     };
     addAndMakeVisible (progDetailedToggle);
 
-    // Click-to-play for progression chord preview
+    // Click-to-play for progression chord preview + highlight keyboard
     practiceChart.onChordSelected = [this](int chordIdx) {
-        if (practicing) return;  // don't interfere during practice
-        auto* prog = practiceChart.isDetailedView()
-            ? (showingProgPreview ? &previewProgression : nullptr) : nullptr;
-        if (prog == nullptr) return;
-        if (chordIdx < 0 || chordIdx >= static_cast<int> (prog->chords.size())) return;
+        if (practicing) return;
+        if (! showingProgPreview) return;
+        if (chordIdx < 0 || chordIdx >= static_cast<int> (previewProgression.chords.size())) return;
 
-        const auto& chord = prog->chords[static_cast<size_t> (chordIdx)];
+        const auto& chord = previewProgression.chords[static_cast<size_t> (chordIdx)];
         int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
         for (int note : chord.midiNotes)
             processorRef.addPreviewMidi (juce::MidiMessage::noteOn (ch, note, 0.7f));
+
+        // Highlight keyboard
+        keyboardRef.clearAllColours();
+        for (int note : chord.midiNotes)
+            keyboardRef.setKeyColour (note, KeyColour::Target);
+        keyboardRef.repaint();
 
         juce::Timer::callAfterDelay (600, [this, ch, notes = chord.midiNotes]() {
             for (int note : notes)
@@ -111,7 +115,7 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
         });
     };
 
-    // Click-to-play for melody note preview
+    // Click-to-play for melody note preview + highlight keyboard
     practiceMLChart.onNoteSelected = [this](int noteIdx) {
         if (practicing) return;
         if (! showingMelPreview) return;
@@ -123,6 +127,11 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
         int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
         float vel = note.velocity > 0 ? static_cast<float> (note.velocity) / 127.0f : 0.7f;
         processorRef.addPreviewMidi (juce::MidiMessage::noteOn (ch, midiNote, vel));
+
+        // Highlight keyboard
+        keyboardRef.clearAllColours();
+        keyboardRef.setKeyColour (midiNote, KeyColour::Target);
+        keyboardRef.repaint();
 
         juce::Timer::callAfterDelay (400, [this, ch, midiNote]() {
             processorRef.addPreviewMidi (juce::MidiMessage::noteOff (ch, midiNote, 0.0f));
@@ -332,6 +341,12 @@ void PracticePanel::onStartStop()
         stopPractice();
         return;
     }
+
+    // Stop any active playback before starting practice
+    if (processorRef.isPlayingProgression())
+        processorRef.stopProgressionPlayback();
+    if (processorRef.isPlayingMelody())
+        processorRef.stopMelodyPlayback();
 
     // Block start if nothing is selected for the current practice type
     if (practiceType == PracticeType::Melody && selectedMelodyId.isEmpty())

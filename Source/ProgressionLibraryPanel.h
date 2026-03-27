@@ -29,6 +29,7 @@ public:
 
     std::function<void (const juce::String& progressionId)> onSelectionChanged;
     std::function<void (const std::vector<int>& midiNotes)> onChordPreview;
+    std::function<void (const Progression& transposed)> onTransposedPreview;
 
 private:
     // ListBoxModel
