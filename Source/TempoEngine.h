@@ -12,7 +12,8 @@ public:
     void connectParameters (std::atomic<float>* bpm,
                             std::atomic<float>* metronomeOn,
                             std::atomic<float>* useHostSync,
-                            std::atomic<float>* responseWindowBeats);
+                            std::atomic<float>* responseWindowBeats,
+                            std::atomic<float>* metronomeVolume = nullptr);
 
     void prepare (double sampleRate, int samplesPerBlock);
 
@@ -45,6 +46,7 @@ private:
     std::atomic<float>* metronomeOnParam = nullptr;
     std::atomic<float>* useHostSyncParam = nullptr;
     std::atomic<float>* responseWindowBeatsParam = nullptr;
+    std::atomic<float>* metronomeVolumeParam = nullptr;
 
     // Audio-thread state
     double sr = 44100.0;
@@ -68,6 +70,9 @@ private:
     std::atomic<bool> beatTick { false };
     std::atomic<double> effectiveBpm { 120.0 };
     std::atomic<double> currentBeatPosition { 0.0 };
+
+    // Pending reset (GUI thread requests, audio thread executes)
+    std::atomic<bool> pendingReset { false };
 
     // Challenge timing
     std::atomic<double> challengeStartBeatPosition { -1.0 };

@@ -60,6 +60,7 @@ private:
   juce::TextButton rescanButton { "Scan" };
   juce::TextButton editPluginButton { "Open" };
   juce::Slider synthVolumeSlider;
+  juce::Slider metronomeVolumeSlider;
   bool isStandaloneMode = false;
 
   // Hosted plugin editor window
@@ -89,6 +90,7 @@ private:
   std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> metronomeAttachment;
   std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> hostSyncAttachment;
   std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> synthVolumeAttachment;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> metronomeVolumeAttachment;
 
   // Tab tracking — deselect when switching tabs
   int lastTabIndex = 0;

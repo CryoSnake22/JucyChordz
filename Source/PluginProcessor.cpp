@@ -40,6 +40,10 @@ AudioPluginAudioProcessor::createParameterLayout() {
       juce::ParameterID{"synthVolume", 1}, "Synth Volume",
       juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.7f));
 
+  layout.add(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{"metronomeVolume", 1}, "Metronome Volume",
+      juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.7f));
+
   return layout;
 }
 
@@ -58,7 +62,8 @@ AudioPluginAudioProcessor::AudioPluginAudioProcessor()
       apvts.getRawParameterValue("bpm"),
       apvts.getRawParameterValue("metronomeOn"),
       apvts.getRawParameterValue("useHostSync"),
-      apvts.getRawParameterValue("responseWindowBeats"));
+      apvts.getRawParameterValue("responseWindowBeats"),
+      apvts.getRawParameterValue("metronomeVolume"));
 
   externalInstrument.initialize();
 
@@ -216,9 +221,21 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
 
       // End of progression
       if (beat >= playbackProgression.totalBeats) {
-        // Send all-notes-off + pedal off
+        // Flush any remaining raw MIDI events at the end boundary
         int ch = channel;
-        addPreviewMidi(juce::MidiMessage::controllerEvent(ch, 64, 0));
+        while (playbackCCIndex < playbackProgression.rawMidi.getNumEvents())
+        {
+          auto* evt = playbackProgression.rawMidi.getEventPointer(playbackCCIndex);
+          auto msg = evt->message;
+          midiMessages.addEvent(msg, s);
+          if (msg.isNoteOff() || (msg.isNoteOn() && msg.getVelocity() == 0))
+            playbackActiveNotes.erase(
+              std::remove(playbackActiveNotes.begin(), playbackActiveNotes.end(), msg.getNoteNumber()),
+              playbackActiveNotes.end());
+          playbackCCIndex++;
+        }
+        // Send pedal off + note-offs at the same sample position
+        midiMessages.addEvent(juce::MidiMessage::controllerEvent(ch, 64, 0), s);
         for (int n : playbackActiveNotes)
           midiMessages.addEvent(juce::MidiMessage::noteOff(ch, n), s);
         playbackActiveNotes.clear();
@@ -274,7 +291,21 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
       // End of melody
       if (beat >= melodyPlaybackData.totalBeats) {
         int ch = channel;
-        addPreviewMidi(juce::MidiMessage::controllerEvent(ch, 64, 0));
+        // Flush remaining raw MIDI events at the end boundary
+        while (melodyPlaybackCCIndex < melodyPlaybackData.rawMidi.getNumEvents())
+        {
+          auto* evt = melodyPlaybackData.rawMidi.getEventPointer(melodyPlaybackCCIndex);
+          auto msg = evt->message;
+          midiMessages.addEvent(msg, s);
+          if (msg.isNoteOff() || (msg.isNoteOn() && msg.getVelocity() == 0))
+          {
+            if (msg.getNoteNumber() == melodyPlaybackActiveNote)
+              melodyPlaybackActiveNote = -1;
+          }
+          melodyPlaybackCCIndex++;
+        }
+        // Send pedal off + note-off at the correct sample position
+        midiMessages.addEvent(juce::MidiMessage::controllerEvent(ch, 64, 0), s);
         if (melodyPlaybackActiveNote >= 0) {
           midiMessages.addEvent(juce::MidiMessage::noteOff(ch, melodyPlaybackActiveNote), s);
           melodyPlaybackActiveNote = -1;

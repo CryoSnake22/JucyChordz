@@ -146,8 +146,8 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
     if (auto* param = processorRef.apvts.getParameter("synthEnabled"))
       param->setValueNotifyingHost(internal ? 1.0f : 0.0f);
 
-    // Show/hide plugin selector in Standalone external mode
-    bool showPluginSelector = isStandaloneMode && !internal;
+    // Show/hide plugin selector in external mode
+    bool showPluginSelector = !internal;
     pluginSelector.setVisible(showPluginSelector);
     rescanButton.setVisible(showPluginSelector);
     editPluginButton.setVisible(showPluginSelector && processorRef.externalInstrument.isPluginLoaded());
@@ -157,7 +157,7 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
   };
   addAndMakeVisible(instrumentModeCombo);
 
-  // Plugin selector (Standalone only, visible when External mode)
+  // Plugin selector (visible when External mode)
   pluginSelector.setTextWhenNothingSelected("Select instrument...");
   pluginSelector.onChange = [this] {
     int selectedId = pluginSelector.getSelectedId();
@@ -232,6 +232,13 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
   synthVolumeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
       processorRef.apvts, "synthVolume", synthVolumeSlider);
 
+  metronomeVolumeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+  metronomeVolumeSlider.setTextBoxStyle(juce::Slider::NoTextBox, true, 0, 0);
+  metronomeVolumeSlider.setColour(juce::Slider::textBoxTextColourId, juce::Colour(ChordyTheme::textSecondary));
+  addAndMakeVisible(metronomeVolumeSlider);
+  metronomeVolumeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      processorRef.apvts, "metronomeVolume", metronomeVolumeSlider);
+
   setSize(1100, 740);
   startTimerHz(60);
 }
@@ -282,9 +289,10 @@ void AudioPluginAudioProcessorEditor::resized() {
   bpmLabel.setBounds(tempoArea.removeFromLeft(36));
   bpmSlider.setBounds(tempoArea.removeFromLeft(140));
   tempoArea.removeFromLeft(8);
-  metronomeToggle.setBounds(tempoArea.removeFromLeft(80));
+  metronomeToggle.setBounds(tempoArea.removeFromLeft(60));
+  metronomeVolumeSlider.setBounds(tempoArea.removeFromLeft(50));
   tempoArea.removeFromLeft(4);
-  hostSyncToggle.setBounds(tempoArea.removeFromLeft(75));
+  hostSyncToggle.setBounds(tempoArea.removeFromLeft(60));
   tempoArea.removeFromLeft(8);
   instrumentModeCombo.setBounds(tempoArea.removeFromLeft(100));
   tempoArea.removeFromLeft(4);

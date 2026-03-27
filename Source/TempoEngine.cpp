@@ -4,12 +4,14 @@
 void TempoEngine::connectParameters (std::atomic<float>* bpm,
                                      std::atomic<float>* metronomeOn,
                                      std::atomic<float>* useHostSync,
-                                     std::atomic<float>* responseWindowBeats)
+                                     std::atomic<float>* responseWindowBeats,
+                                     std::atomic<float>* metronomeVolume)
 {
     bpmParam = bpm;
     metronomeOnParam = metronomeOn;
     useHostSyncParam = useHostSync;
     responseWindowBeatsParam = responseWindowBeats;
+    metronomeVolumeParam = metronomeVolume;
 }
 
 void TempoEngine::prepare (double sampleRate, int /*samplesPerBlock*/)
@@ -31,6 +33,21 @@ void TempoEngine::process (juce::AudioBuffer<float>& buffer,
                            juce::AudioPlayHead* playHead,
                            int numSamples)
 {
+    // Apply pending reset on the audio thread (avoids cutting off mid-render click)
+    if (pendingReset.exchange (false, std::memory_order_acquire))
+    {
+        samplePosition = 0.0;
+        currentBeat = 0;
+        absoluteBeatCount = 0.0;
+        // Let any in-progress click finish naturally (don't zero clickSamplesRemaining)
+        clickSampleOffset = 0;
+
+        beatNumber.store (0, std::memory_order_relaxed);
+        beatPhase.store (0.0f, std::memory_order_relaxed);
+        beatTick.store (false, std::memory_order_relaxed);
+        currentBeatPosition.store (0.0, std::memory_order_relaxed);
+    }
+
     float bpm = (bpmParam != nullptr) ? bpmParam->load() : 120.0f;
     bool metronomeOn = (metronomeOnParam != nullptr) && metronomeOnParam->load() > 0.5f;
     bool useHost = (useHostSyncParam != nullptr) && useHostSyncParam->load() > 0.5f;
@@ -118,16 +135,9 @@ bool TempoEngine::consumeBeatTick()
 
 void TempoEngine::resetBeatPosition()
 {
-    samplePosition = 0.0;
-    currentBeat = 0;
-    absoluteBeatCount = 0.0;
-    clickSamplesRemaining = 0;
-    clickSampleOffset = 0;
-
-    beatNumber.store (0, std::memory_order_relaxed);
-    beatPhase.store (0.0f, std::memory_order_relaxed);
-    beatTick.store (false, std::memory_order_relaxed);
-    currentBeatPosition.store (0.0, std::memory_order_relaxed);
+    // Request reset — the audio thread will apply it at the start of the next buffer
+    // to avoid cutting off a mid-render metronome click (which causes a pop)
+    pendingReset.store (true, std::memory_order_release);
 }
 
 void TempoEngine::markChallengeStart()
@@ -173,6 +183,8 @@ void TempoEngine::renderClick (juce::AudioBuffer<float>& buffer, int numSamples)
     int totalClickDuration = clickIsDownbeat ? clickDownbeatLength : clickUpbeatLength;
     double freq = clickIsDownbeat ? 1000.0 : 800.0;
     float amplitude = clickIsDownbeat ? 0.4f : 0.28f;
+    float metVol = (metronomeVolumeParam != nullptr) ? metronomeVolumeParam->load() : 0.7f;
+    amplitude *= metVol;
     double phaseInc = freq / sr * juce::MathConstants<double>::twoPi;
 
     int startSample = clickSampleOffset;
