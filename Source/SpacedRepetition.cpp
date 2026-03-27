@@ -120,11 +120,13 @@ void SpacedRepetitionEngine::recordAttempt (const juce::String& voicingId,
 }
 
 PracticeChallenge SpacedRepetitionEngine::getNextChallenge (
-    const juce::String& voicingId) const
+    const juce::String& voicingId, int avoidKey) const
 {
     double now = currentTimeSeconds();
     double bestScore = -1.0;
     int bestKey = -1;
+    double secondBestScore = -1.0;
+    int secondBestKey = -1;
 
     // Check all 12 keys
     for (int key = 0; key < 12; ++key)
@@ -147,10 +149,21 @@ PracticeChallenge SpacedRepetitionEngine::getNextChallenge (
 
         if (score > bestScore)
         {
+            secondBestScore = bestScore;
+            secondBestKey = bestKey;
             bestScore = score;
             bestKey = key;
         }
+        else if (score > secondBestScore)
+        {
+            secondBestScore = score;
+            secondBestKey = key;
+        }
     }
+
+    // Avoid repeating the same key if possible
+    if (bestKey == avoidKey && secondBestKey >= 0)
+        bestKey = secondBestKey;
 
     if (bestKey < 0)
         bestKey = 0;

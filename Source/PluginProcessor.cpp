@@ -61,9 +61,14 @@ AudioPluginAudioProcessor::AudioPluginAudioProcessor()
       apvts.getRawParameterValue("responseWindowBeats"));
 
   externalInstrument.initialize();
+
+  // Load shared libraries from disk (if file exists from a previous session)
+  loadLibrariesFromDisk();
 }
 
-AudioPluginAudioProcessor::~AudioPluginAudioProcessor() {}
+AudioPluginAudioProcessor::~AudioPluginAudioProcessor() {
+  saveLibrariesToDisk();
+}
 
 //==============================================================================
 const juce::String AudioPluginAudioProcessor::getName() const {
@@ -336,8 +341,10 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
     if (externalInstrument.processBlock(buffer, midiMessages))
     {
       // Apply volume slider to hosted plugin output
+      // Gain boost (3x) compensates for internal synth being much hotter
+      // (additive polyphony with no output normalization)
       float vol = *apvts.getRawParameterValue("synthVolume");
-      buffer.applyGain(vol);
+      buffer.applyGain(vol * 3.0f);
     }
     else
     {
@@ -406,6 +413,9 @@ void AudioPluginAudioProcessor::getStateInformation(
 
   std::unique_ptr<juce::XmlElement> xml(state.createXml());
   copyXmlToBinary(*xml, destData);
+
+  // Also sync to shared file so other instances pick up changes
+  saveLibrariesToDisk();
 }
 
 void AudioPluginAudioProcessor::setStateInformation(const void *data,
@@ -414,7 +424,7 @@ void AudioPluginAudioProcessor::setStateInformation(const void *data,
   if (xml != nullptr && xml->hasTagName(apvts.state.getType())) {
     auto state = juce::ValueTree::fromXml(*xml);
 
-    // Restore voicing library and SR state from children
+    // Restore voicing library and SR state from APVTS state (backward compat)
     auto vlTree = state.getChildWithName("VoicingLibrary");
     if (vlTree.isValid())
       voicingLibrary.fromValueTree(vlTree);
@@ -441,7 +451,66 @@ void AudioPluginAudioProcessor::setStateInformation(const void *data,
     }
 
     apvts.replaceState(state);
+
+    // Override with shared library file if it exists (syncs between DAW and Standalone)
+    auto libFile = getLibrariesFile();
+    if (libFile.existsAsFile())
+      loadLibrariesFromDisk();
+    else
+      saveLibrariesToDisk();  // Seed the shared file from this instance's state
   }
+}
+
+//==============================================================================
+juce::File AudioPluginAudioProcessor::getLibrariesFile()
+{
+    auto appDataDir = juce::File::getSpecialLocation (
+        juce::File::userApplicationDataDirectory)
+        .getChildFile ("Chordy");
+    appDataDir.createDirectory();
+    return appDataDir.getChildFile ("libraries.xml");
+}
+
+void AudioPluginAudioProcessor::saveLibrariesToDisk()
+{
+    juce::ValueTree root ("ChordyLibraries");
+    root.appendChild (voicingLibrary.toValueTree(), nullptr);
+    root.appendChild (progressionLibrary.toValueTree(), nullptr);
+    root.appendChild (melodyLibrary.toValueTree(), nullptr);
+    root.appendChild (spacedRepetition.toValueTree(), nullptr);
+
+    auto xml = root.createXml();
+    if (xml != nullptr)
+        xml->writeTo (getLibrariesFile());
+}
+
+void AudioPluginAudioProcessor::loadLibrariesFromDisk()
+{
+    auto file = getLibrariesFile();
+    if (! file.existsAsFile())
+        return;
+
+    auto xml = juce::XmlDocument::parse (file);
+    if (xml == nullptr || ! xml->hasTagName ("ChordyLibraries"))
+        return;
+
+    auto root = juce::ValueTree::fromXml (*xml);
+
+    auto vlTree = root.getChildWithName ("VoicingLibrary");
+    if (vlTree.isValid())
+        voicingLibrary.fromValueTree (vlTree);
+
+    auto plTree = root.getChildWithName ("ProgressionLibrary");
+    if (plTree.isValid())
+        progressionLibrary.fromValueTree (plTree);
+
+    auto mlTree = root.getChildWithName ("MelodyLibrary");
+    if (mlTree.isValid())
+        melodyLibrary.fromValueTree (mlTree);
+
+    auto srTree = root.getChildWithName ("SpacedRepetition");
+    if (srTree.isValid())
+        spacedRepetition.fromValueTree (srTree);
 }
 
 void AudioPluginAudioProcessor::startProgressionPlayback (const Progression& prog) {

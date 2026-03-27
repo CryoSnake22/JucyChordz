@@ -847,6 +847,7 @@ void ProgressionLibraryPanel::onConfirmSave()
     // Remove old version if editing an existing progression (same ID)
     processorRef.progressionLibrary.removeProgression (pendingProgression.id);
     processorRef.progressionLibrary.addProgression (pendingProgression);
+    processorRef.saveLibrariesToDisk();
     enterIdle();
 }
 
@@ -856,6 +857,7 @@ void ProgressionLibraryPanel::onDelete()
     if (id.isNotEmpty())
     {
         processorRef.progressionLibrary.removeProgression (id);
+        processorRef.saveLibrariesToDisk();
         progressionList.updateContent();
         chartPreview.setProgressionReadOnly (nullptr);
         repaint();

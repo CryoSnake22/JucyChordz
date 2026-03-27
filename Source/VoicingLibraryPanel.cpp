@@ -453,6 +453,7 @@ void VoicingLibraryPanel::onConfirmSave()
     pendingVoicing.alterations = confirmAltEditor.getText().trim();
 
     processorRef.voicingLibrary.addVoicing (pendingVoicing);
+    processorRef.saveLibrariesToDisk();
     pendingVoicing = {};
 
     // Return to normal mode
@@ -495,6 +496,7 @@ void VoicingLibraryPanel::onDelete()
     if (id.isNotEmpty())
     {
         processorRef.voicingLibrary.removeVoicing (id);
+        processorRef.saveLibrariesToDisk();
         updateDisplayedVoicings();
     }
 }

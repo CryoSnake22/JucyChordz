@@ -37,7 +37,8 @@ public:
     void recordAttempt (const juce::String& voicingId, int keyIndex, int quality);
 
     // Get the next challenge for a given voicing (picks the most-overdue key)
-    PracticeChallenge getNextChallenge (const juce::String& voicingId) const;
+    // avoidKey: if >= 0, skip this key to prevent consecutive repeats
+    PracticeChallenge getNextChallenge (const juce::String& voicingId, int avoidKey = -1) const;
 
     // Get the next challenge across all voicings (needs list of voicing IDs)
     PracticeChallenge getNextChallenge (const std::vector<juce::String>& voicingIds) const;

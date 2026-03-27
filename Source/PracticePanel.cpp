@@ -474,6 +474,9 @@ void PracticePanel::stopPractice()
         param->setValueNotifyingHost (0.0f);
 
     processorRef.tempoEngine.clearChallengeStart();
+
+    // Persist SR data changes from this practice session
+    processorRef.saveLibrariesToDisk();
 }
 
 // --- Practice update (called from 60Hz timer) ---
@@ -726,7 +729,7 @@ void PracticePanel::enterPlayPhase()
     if (customMode)
         nextChallenge = getNextCustomChallenge();
     else
-        nextChallenge = processorRef.spacedRepetition.getNextChallenge (practicingVoicingId);
+        nextChallenge = processorRef.spacedRepetition.getNextChallenge (practicingVoicingId, currentChallenge.keyIndex);
 
     nextRootText = ChordDetector::noteNameFromPitchClass (nextChallenge.keyIndex);
 
@@ -798,7 +801,7 @@ void PracticePanel::loadNextChallenge()
     if (customMode)
         currentChallenge = getNextCustomChallenge();
     else
-        currentChallenge = processorRef.spacedRepetition.getNextChallenge (vid);
+        currentChallenge = processorRef.spacedRepetition.getNextChallenge (vid, currentChallenge.keyIndex);
 
     const auto* voicing = processorRef.voicingLibrary.getVoicing (vid);
     if (voicing == nullptr)
@@ -1027,9 +1030,17 @@ PracticeChallenge PracticePanel::getNextCustomChallenge()
 
     if (customKeyIndex >= static_cast<int> (customKeySequence.size()))
     {
+        // Remember the last key to avoid repeats at the boundary
+        int lastKey = customKeySequence.back();
+
         // Cycle: rebuild for next round
         if (rootOrder == RootOrder::Random)
+        {
             std::shuffle (customKeySequence.begin(), customKeySequence.end(), rng);
+            // Avoid repeating the last key at the boundary
+            if (customKeySequence.size() > 1 && customKeySequence.front() == lastKey)
+                std::swap (customKeySequence[0], customKeySequence[1]);
+        }
         customKeyIndex = 0;
     }
 
@@ -1221,7 +1232,7 @@ void PracticePanel::advanceProgressionChord()
         }
         else
         {
-            auto challenge = processorRef.spacedRepetition.getNextChallenge (practicingProgressionId);
+            auto challenge = processorRef.spacedRepetition.getNextChallenge (practicingProgressionId, transposedProgression.keyPitchClass);
             nextKey = challenge.keyIndex;
         }
 
@@ -1341,7 +1352,7 @@ void PracticePanel::updateProgressionPractice (const std::vector<int>& activeNot
             if (customMode)
                 nextKey = getNextCustomChallenge().keyIndex;
             else
-                nextKey = processorRef.spacedRepetition.getNextChallenge (practicingProgressionId).keyIndex;
+                nextKey = processorRef.spacedRepetition.getNextChallenge (practicingProgressionId, transposedProgression.keyPitchClass).keyIndex;
 
             loadProgressionChallenge (nextKey);
             return;
@@ -1630,7 +1641,7 @@ void PracticePanel::advanceMelodyNote()
         if (customMode)
             nextKey = getNextCustomChallenge().keyIndex;
         else
-            nextKey = processorRef.spacedRepetition.getNextChallenge (practicingMelodyId).keyIndex;
+            nextKey = processorRef.spacedRepetition.getNextChallenge (practicingMelodyId, transposedMelody.keyPitchClass).keyIndex;
 
         loadMelodyChallenge (nextKey);
         return;
@@ -1752,7 +1763,7 @@ void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
             if (customMode)
                 nextKey = getNextCustomChallenge().keyIndex;
             else
-                nextKey = processorRef.spacedRepetition.getNextChallenge (practicingMelodyId).keyIndex;
+                nextKey = processorRef.spacedRepetition.getNextChallenge (practicingMelodyId, transposedMelody.keyPitchClass).keyIndex;
 
             loadMelodyChallenge (nextKey);
             return;

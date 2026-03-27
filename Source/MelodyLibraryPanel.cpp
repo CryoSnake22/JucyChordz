@@ -145,6 +145,9 @@ MelodyLibraryPanel::MelodyLibraryPanel (AudioPluginAudioProcessor& processor)
     quantBtnSetup (quantHalfBtn, 0.5);
     quantBtnSetup (quantQuarterBtn, 0.25);
 
+    editPlayButton.onClick = [this] { onEditPlayToggle(); };
+    addChildComponent (editPlayButton);
+
     transposeLabel.setText ("Transpose:", juce::dontSendNotification);
     transposeLabel.setFont (juce::FontOptions (ChordyTheme::fontSmall));
     transposeLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::textSecondary));
@@ -290,16 +293,18 @@ void MelodyLibraryPanel::layoutEditMode (juce::Rectangle<int> area)
     editHeader.setBounds (area.removeFromTop (24));
     area.removeFromTop (4);
 
-    // Quantize buttons row
+    // Quantize buttons row + Play
     auto quantRow = area.removeFromTop (24);
-    int btnW = (quantRow.getWidth() - 12) / 4;
+    int btnW = (quantRow.getWidth() - 16) / 5;
     quantRawBtn.setBounds (quantRow.removeFromLeft (btnW));
     quantRow.removeFromLeft (4);
     quantBeatBtn.setBounds (quantRow.removeFromLeft (btnW));
     quantRow.removeFromLeft (4);
     quantHalfBtn.setBounds (quantRow.removeFromLeft (btnW));
     quantRow.removeFromLeft (4);
-    quantQuarterBtn.setBounds (quantRow);
+    quantQuarterBtn.setBounds (quantRow.removeFromLeft (btnW));
+    quantRow.removeFromLeft (4);
+    editPlayButton.setBounds (quantRow);
     area.removeFromTop (4);
 
     // Transpose row
@@ -391,6 +396,7 @@ void MelodyLibraryPanel::setEditModeVisible (bool v)
     quantBeatBtn.setVisible (v);
     quantHalfBtn.setVisible (v);
     quantQuarterBtn.setVisible (v);
+    editPlayButton.setVisible (v);
     transposeLabel.setVisible (v);
     transposeDownBtn.setVisible (v);
     transposeUpBtn.setVisible (v);
@@ -422,6 +428,9 @@ void MelodyLibraryPanel::enterIdle()
 {
     if (panelState == PanelState::Recording)
         processorRef.progressionRecorder.stopRecording();
+
+    if (processorRef.isPlayingMelody())
+        processorRef.stopMelodyPlayback();
 
     panelState = PanelState::Idle;
     pendingMelody = {};
@@ -499,6 +508,8 @@ void MelodyLibraryPanel::enterEditing()
     quantHalfBtn.setToggleState (currentQuantizeResolution == 0.5, juce::dontSendNotification);
     quantQuarterBtn.setToggleState (currentQuantizeResolution == 0.25, juce::dontSendNotification);
 
+    editPlayButton.setButtonText ("Play");
+
     editChart.setQuantizeGrid (currentQuantizeResolution);
     editChart.setMelody (&pendingMelody);
 
@@ -574,6 +585,8 @@ void MelodyLibraryPanel::updateTimerCallback()
 
         if (panelState == PanelState::Idle)
             playButton.setButtonText ("Play");
+        else if (panelState == PanelState::Editing)
+            editPlayButton.setButtonText ("Play");
     }
 
     // Note preview note-off
@@ -792,6 +805,7 @@ void MelodyLibraryPanel::onConfirmSave()
     // Remove old version if editing an existing melody (same ID)
     processorRef.melodyLibrary.removeMelody (pendingMelody.id);
     processorRef.melodyLibrary.addMelody (pendingMelody);
+    processorRef.saveLibrariesToDisk();
     enterIdle();
 }
 
@@ -801,6 +815,7 @@ void MelodyLibraryPanel::onDelete()
     if (id.isNotEmpty())
     {
         processorRef.melodyLibrary.removeMelody (id);
+        processorRef.saveLibrariesToDisk();
         melodyList.updateContent();
         chartPreview.setMelodyReadOnly (nullptr);
         repaint();
@@ -843,6 +858,23 @@ void MelodyLibraryPanel::onPlayToggle()
     int keyRoot = 60 + mel->keyPitchClass;
     processorRef.startMelodyPlayback (*mel, keyRoot);
     playButton.setButtonText ("Stop");
+}
+
+void MelodyLibraryPanel::onEditPlayToggle()
+{
+    if (processorRef.isPlayingMelody())
+    {
+        processorRef.stopMelodyPlayback();
+        editPlayButton.setButtonText ("Play");
+        return;
+    }
+
+    if (pendingMelody.notes.empty())
+        return;
+
+    int keyRoot = 60 + pendingMelody.keyPitchClass;
+    processorRef.startMelodyPlayback (pendingMelody, keyRoot);
+    editPlayButton.setButtonText ("Stop");
 }
 
 void MelodyLibraryPanel::refresh()

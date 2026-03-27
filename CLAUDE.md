@@ -36,7 +36,7 @@ JUCE is included as a **git submodule** at `./JUCE/` via `add_subdirectory(JUCE)
 |---|---|
 | `PluginProcessor.h/.cpp` | Audio/MIDI processing hub. Owns `MidiKeyboardState`, APVTS, `VoicingLibrary`, `ProgressionLibrary`, `MelodyLibrary`, `ExternalInstrument`, `ProgressionRecorder`, `SpacedRepetitionEngine`, `TempoEngine`, `ChordySynth`. Lock-free note sharing via atomic bitfield + per-note velocity tracking (`noteVelocities[128]`). Preview MIDI injection via SpinLock+MidiBuffer. Progression and melody playback engines replay raw MIDI directly (sample-accurate, preserves velocity + pedal + all CC events). Instrument routing: internal synth OR external hosted plugin, controlled by `synthEnabled` parameter. |
 | `PluginEditor.h/.cpp` | Top-level GUI. Hosts keyboard, chord display, tabbed library panel (Voicings/Progressions/Melodies), practice panel. 60Hz timer drives chord detection, recording, practice, playback cursor, beat indicator, voicing preview, and live stats refresh. Tab-change detection clears selections. Tempo bar includes instrument mode selector (Internal/External ComboBox), plugin selector (Standalone only), Scan button, Open button for hosted plugin editor, and volume slider. |
-| `ExternalInstrument.h/.cpp` | VST3/AU plugin hosting for Standalone mode. Uses `AudioPluginFormatManager` (VST3 + AU formats), `KnownPluginList`, `PluginDirectoryScanner`. Background scanning with dead-mans-pedal crash protection. Async plugin loading via background thread. Plugin list cached to `~/Library/Application Support/Chordy/pluginList.xml`. Instruments deduplicated by name (VST3 preferred over AU). Plugin state persisted in session via XML + base64 blob. Hosted plugin's editor opens in a separate `DocumentWindow`. |
+| `ExternalInstrument.h/.cpp` | VST3/AU plugin hosting for Standalone mode. Uses `AudioPluginFormatManager` (VST3 + AU formats), `KnownPluginList`, `PluginDirectoryScanner`. Background scanning with dead-mans-pedal crash protection. Async plugin loading via `createPluginInstanceAsync` (JUCE-recommended pattern). Bus layout negotiation (stereo preferred, falls back gracefully). Channel-safe `processBlock` with scratch buffer for mismatched layouts. CriticalSection for plugin swap (ScopedTryLock on audio thread). Loading dead-mans-pedal (`loadingPlugin.txt`) protects against SIGSEGV during plugin init. Plugin list cached to `~/Library/Application Support/Chordy/pluginList.xml`. Instruments deduplicated by name (VST3 preferred over AU). Plugin state persisted in session via XML + base64 blob (async restore). Hosted plugin's editor opens in a separate `DocumentWindow`. |
 | `ChordyTheme.h` | Header-only constants namespace -- all colors, font sizes, spacing, corner radii, chart colors. Every visual value lives here. |
 | `ChordyLookAndFeel.h/.cpp` | Custom `LookAndFeel_V4` subclass. Flat rounded buttons, pill toggles, thin-track sliders, underline tabs. Avenir Next font. |
 | `ChordySynth.h/.cpp` | Built-in piano synth. 2-operator FM synthesis (carrier + modulator at 1:1 ratio) with velocity-sensitive dynamics, pitch-dependent decay, and an octave partial for brightness. 12-voice polyphony. Renders additively in `processBlock()`. Enabled by default. |
@@ -89,12 +89,16 @@ On stop, both engines send pedal-off (CC64=0) before note-offs to prevent stuck 
 
 - **Compile definitions**: `JUCE_PLUGINHOST_VST3=1`, `JUCE_PLUGINHOST_AU=1` in CMakeLists.txt
 - **Format registration**: Manual (`new VST3PluginFormat()`, `new AudioUnitPluginFormat()`) because `addDefaultFormats()` is deleted in JUCE headless builds
-- **Scanning**: Background thread via `PluginDirectoryScanner`. Results cached to `~/Library/Application Support/Chordy/pluginList.xml`. Dead-mans-pedal file blacklists crashy plugins.
-- **Loading**: Background thread with try/catch protection. Plugin swapped in under SpinLock.
+- **Scanning**: Background thread via `PluginDirectoryScanner`. Results cached to `~/Library/Application Support/Chordy/pluginList.xml`. Dead-mans-pedal file (`deadMansPedal.txt`) blacklists crashy plugins.
+- **Loading**: Uses `createPluginInstanceAsync` (JUCE-recommended pattern from HostPluginDemo). Callback fires on message thread. Generation counter prevents stale callbacks from racing. try/catch around `prepareToPlay`.
+- **Bus layout negotiation**: `setupPluginBuses()` tries stereo in/out, then stereo-out only (instruments), then accepts plugin default. `setRateAndBufferSizeDetails()` called before `prepareToPlay()`.
+- **Channel-safe processBlock**: If hosted plugin's channel count differs from host buffer, a pre-allocated scratch buffer handles the mismatch (copy in, process, copy out). Fast path (zero overhead) when channels match.
+- **Thread safety**: `CriticalSection` (not SpinLock) protects hosted plugin pointer. Audio thread uses `ScopedTryLock` (non-blocking). All other paths use `ScopedLock`.
 - **Deduplication**: Plugins deduplicated by name in UI, preferring VST3 over AU.
-- **Plugin editor**: Opens in a separate `DocumentWindow` (always-on-top, closeable, resizable) via "Open" button in tempo bar.
-- **State persistence**: Plugin description XML + plugin state as base64 blob, saved as ValueTree child of APVTS state.
-- **Known issue**: Some plugins (e.g., Keyscape) crash during hosted loading due to their initialization requirements. This is a plugin-specific incompatibility, not a Chordy bug.
+- **Plugin editor**: Opens in a separate `DocumentWindow` (always-on-top, closeable, resizable) via "Open" button in tempo bar. Editor window closed automatically when loading a new plugin (prevents dangling pointer).
+- **State persistence**: Plugin description XML + plugin state as base64 blob, saved as ValueTree child of APVTS state. Restore is async via `createPluginInstanceAsync` with try/catch around `setStateInformation` + `prepareToPlay`.
+- **Loading dead-mans-pedal**: Before loading any plugin, its name is written to `~/Library/Application Support/Chordy/loadingPlugin.txt`. Cleared on success or caught failure. If a SIGSEGV crashes the host, the file survives -- on next startup, `restoreFromStateXml` detects it and skips the crashy plugin. User can retry via the UI dropdown.
+- **Files cached at**: `~/Library/Application Support/Chordy/` -- `pluginList.xml` (scan cache), `deadMansPedal.txt` (scan crashes), `loadingPlugin.txt` (load crashes).
 
 ### GUI Layout (1100x740)
 
@@ -207,7 +211,7 @@ All visual styling centralized -- **never hardcode hex colors or font sizes**.
 
 ## Key Development Notes
 
-- Audio thread rules: no allocations, no blocking, no locks in `processBlock()` -- exceptions: `lastPlayedNotes` mutex (only when notes active), `previewMidiLock` SpinLock (brief), `pluginLock` SpinLock (brief, try-lock for hosted plugin).
+- Audio thread rules: no allocations, no blocking, no locks in `processBlock()` -- exceptions: `lastPlayedNotes` mutex (only when notes active), `previewMidiLock` SpinLock (brief), `pluginLock` CriticalSection (ScopedTryLock, non-blocking for hosted plugin).
 - Preview MIDI path (`addPreviewMidi`) bypasses `keyboardState` entirely -- no keyboard flash, no interference with practice note detection. Used for voicing preview, chord preview, Play button, playback note-offs, melody backing pad.
 - Both playback engines (progression + melody) replay raw MIDI directly from `rawMidi` MidiMessageSequence. This preserves velocity, pedal, all CC events exactly as recorded. No chord/note reconstruction during playback.
 - `ProgressionRecorder.recording` is `std::atomic<bool>` for audio thread safety. Reused for melody recording (no separate MelodyRecorder). Records note-on/off AND CC64 (sustain pedal).
@@ -220,7 +224,9 @@ All visual styling centralized -- **never hardcode hex colors or font sizes**.
 - Melody practice keyboard coloring: must refresh every frame (like voicing practice's `updateKeyboardColours`). Track `lastCorrectPC` so held correct notes stay green after target advances. Without continuous refresh, JUCE's default key-down color (orange/yellow) shows through.
 - Start button is blocked when nothing is selected for the current practice type.
 - External instrument hosting: `addDefaultFormats()` is deleted in JUCE headless builds -- must register formats manually via `new VST3PluginFormat()` / `new AudioUnitPluginFormat()`.
-- Some plugins (Keyscape) crash during hosted loading. This is a known plugin-specific issue. Async loading with try/catch provides partial protection but signal-level crashes (segfault) cannot be caught.
+- **Plugin hosting must use `createPluginInstanceAsync`** (not `Thread::launch` + synchronous `createPluginInstance`). Complex plugins like Keyscape need message thread access during initialization. The old background-thread approach caused crashes. Follow the JUCE `HostPluginDemo` pattern: async load, callback on message thread, CriticalSection (not SpinLock), bus layout negotiation, `setRateAndBufferSizeDetails` before `prepareToPlay`.
+- **Bus layout negotiation is essential** before calling a hosted plugin's `processBlock`. The AudioBuffer channel count must exactly match what the plugin expects. Use `setupPluginBuses()` after loading and a scratch buffer in `processBlock` for mismatches.
+- Loading dead-mans-pedal (`loadingPlugin.txt`) protects against signal-level crashes (SIGSEGV) that try/catch cannot catch. Written before load, cleared on success. Checked on restore to skip crashy plugins.
 - **Playback should always use raw MIDI replay by default.** Only reconstruct from analyzed data when transposition requires it (e.g., practice mode transposing to different keys). Raw replay preserves velocity, pedal, timing nuance exactly.
 - **When a UI behavior works in one mode but not another**, diff the two working code paths side-by-side before writing a fix. The answer is always in what the working version does differently.
 - No test infrastructure exists yet

@@ -90,6 +90,10 @@ public:
   // External instrument hosting (Standalone VST/AU loading)
   ExternalInstrument externalInstrument;
 
+  // Shared library persistence — syncs voicings/progressions/melodies between instances
+  void saveLibrariesToDisk();
+  void loadLibrariesFromDisk();
+
   // Preview MIDI injection — GUI thread pushes, audio thread drains into synth
   void addPreviewMidi (const juce::MidiMessage& msg);
 
@@ -134,6 +138,7 @@ private:
   int melodyPlaybackCCIndex = 0;  // tracks which CC events from rawMidi have been sent
 
   static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+  static juce::File getLibrariesFile();
 
   //==============================================================================
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessor)

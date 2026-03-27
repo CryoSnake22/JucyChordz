@@ -73,6 +73,7 @@ private:
     juce::ComboBox ccQualityCombo;
     juce::TextEditor ccAlterationsEditor;
 
+    juce::TextButton editPlayButton { "Play" };
     juce::TextButton editDoneButton { "Done" };
     juce::TextButton editCancelButton { "Cancel" };
 
@@ -109,6 +110,7 @@ private:
     void onEditExisting();
     void onTranspose (int semitones);
     void onPlayToggle();
+    void onEditPlayToggle();
 
     // Chord context editing
     void onAddChordContext();

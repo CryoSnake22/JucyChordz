@@ -296,7 +296,7 @@ void AudioPluginAudioProcessorEditor::resized() {
     tempoArea.removeFromLeft(4);
     if (editPluginButton.isVisible())
     {
-      editPluginButton.setBounds(tempoArea.removeFromLeft(40));
+      editPluginButton.setBounds(tempoArea.removeFromLeft(55));
       tempoArea.removeFromLeft(4);
     }
   }
