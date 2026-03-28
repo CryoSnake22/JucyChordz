@@ -535,6 +535,11 @@ void ProgressionLibraryPanel::enterIdle()
     resized();
     repaint();
     updateDisplayedProgressions();
+
+    // Restore practice panel preview for currently selected item
+    auto selId = getSelectedProgressionId();
+    if (onSelectionChanged)
+        onSelectionChanged (selId);
 }
 
 void ProgressionLibraryPanel::setButtonsEnabled (bool enabled)

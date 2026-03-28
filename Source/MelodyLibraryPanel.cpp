@@ -496,6 +496,11 @@ void MelodyLibraryPanel::enterIdle()
     resized();
     repaint();
     updateDisplayedMelodies();
+
+    // Restore practice panel preview for currently selected item
+    auto selId = getSelectedMelodyId();
+    if (onSelectionChanged)
+        onSelectionChanged (selId);
 }
 
 void MelodyLibraryPanel::setButtonsEnabled (bool enabled)
