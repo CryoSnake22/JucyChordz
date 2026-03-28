@@ -26,6 +26,7 @@ public:
 
     std::function<void (const juce::String& melodyId)> onSelectionChanged;
     bool isEditing() const;
+    void togglePlay();  // spacebar: play/stop in idle or edit mode
     std::function<void()> onRecordStarted;
     std::function<void()> onEditStarted;
     void setButtonsEnabled (bool enabled);

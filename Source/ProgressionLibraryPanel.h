@@ -26,6 +26,7 @@ public:
 
     juce::String getSelectedProgressionId() const;
     void refreshStatsChart();
+    void togglePlay();  // spacebar: play/stop in idle or edit mode
 
     std::function<void (const juce::String& progressionId)> onSelectionChanged;
     bool isEditing() const;

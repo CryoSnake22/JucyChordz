@@ -1171,13 +1171,7 @@ void PracticePanel::updateKeyboardColours (const std::vector<int>& activeNotes)
 
 void PracticePanel::updateStats()
 {
-    int attempts = processorRef.spacedRepetition.getTotalAttempts();
-    int successes = processorRef.spacedRepetition.getTotalSuccesses();
-    double accuracy = processorRef.spacedRepetition.getAccuracy();
-
-    juce::String statsText = "Accuracy: " + juce::String (juce::roundToInt (accuracy * 100))
-                             + "% (" + juce::String (successes) + "/" + juce::String (attempts) + ")";
-    statsLabel.setText (statsText, juce::dontSendNotification);
+    statsLabel.setText ("", juce::dontSendNotification);
 }
 
 void PracticePanel::onNext()

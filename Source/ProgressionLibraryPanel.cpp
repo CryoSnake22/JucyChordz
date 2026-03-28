@@ -953,6 +953,14 @@ void ProgressionLibraryPanel::onTranspose (int semitones)
     }
 }
 
+void ProgressionLibraryPanel::togglePlay()
+{
+    if (panelState == PanelState::Editing)
+        onEditPlayToggle();
+    else if (panelState == PanelState::Idle)
+        onPlayToggle();
+}
+
 void ProgressionLibraryPanel::onPlayToggle()
 {
     if (processorRef.isPlayingProgression())
@@ -1044,8 +1052,7 @@ void ProgressionLibraryPanel::paintListBoxItem (int rowNumber, juce::Graphics& g
     g.drawText (p.name, 8, 0, width - 80, height, juce::Justification::centredLeft);
 
     juce::String badge = ChordDetector::noteNameFromPitchClass (p.keyPitchClass)
-                         + " " + p.mode.substring (0, 3)
-                         + " (" + juce::String (p.chords.size()) + ")";
+                         + " " + p.mode.substring (0, 3);
     g.setColour (juce::Colour (ChordyTheme::textSecondary));
     g.setFont (11.0f);
     g.drawText (badge, width - 90, 0, 82, height, juce::Justification::centredRight);

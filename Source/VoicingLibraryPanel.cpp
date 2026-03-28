@@ -111,6 +111,9 @@ VoicingLibraryPanel::VoicingLibraryPanel (AudioPluginAudioProcessor& processor)
         const auto* v = processorRef.voicingLibrary.getVoicing (id);
         if (v == nullptr) return;
 
+        // Show yellow highlight on clicked bar
+        statsChart.setPlayingKey (keyIndex);
+
         // Transpose to clicked key, staying near original octave
         int semitoneShift = keyIndex - v->rootPitchClass;
         if (semitoneShift < -6) semitoneShift += 12;

@@ -43,7 +43,7 @@ juce_add_plugin(
   COMPANY_NAME
   JezzterInc
   ICON_BIG
-  "${CMAKE_CURRENT_SOURCE_DIR}/icon_to_set.png"
+  "${CMAKE_CURRENT_SOURCE_DIR}/ChordLab.png"
   IS_SYNTH
   TRUE
   NEEDS_MIDI_INPUT

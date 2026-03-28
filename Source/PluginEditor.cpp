@@ -698,3 +698,33 @@ void AudioPluginAudioProcessorEditor::closePluginEditor()
 {
   pluginEditorWindow.reset();
 }
+
+bool AudioPluginAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
+{
+  if (key == juce::KeyPress::spaceKey)
+  {
+    // Practice mode: space = stop
+    if (practicePanel.isPracticing())
+    {
+      practicePanel.stopPractice();
+      return true;
+    }
+
+    // Library mode: space = play/stop based on active tab
+    int tab = libraryTabs.getCurrentTabIndex();
+    if (tab == 1) // Progressions
+    {
+      progressionLibraryPanel.togglePlay();
+      return true;
+    }
+    if (tab == 2) // Melodies
+    {
+      melodyLibraryPanel.togglePlay();
+      return true;
+    }
+
+    return true;
+  }
+
+  return false;
+}

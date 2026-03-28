@@ -911,6 +911,14 @@ void MelodyLibraryPanel::onTranspose (int semitones)
     editChart.repaint();
 }
 
+void MelodyLibraryPanel::togglePlay()
+{
+    if (panelState == PanelState::Editing)
+        onEditPlayToggle();
+    else if (panelState == PanelState::Idle)
+        onPlayToggle();
+}
+
 void MelodyLibraryPanel::onPlayToggle()
 {
     if (processorRef.isPlayingMelody())
