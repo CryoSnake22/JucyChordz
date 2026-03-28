@@ -306,11 +306,11 @@ void ProgressionChartComponent::mouseDrag (const juce::MouseEvent& e)
     if (dragEdge == DragEdge::EndMarker)
     {
         int row = getRowForBeat (progression->totalBeats);
-        double newEnd = snapBeat (xToBeat (e.position.x, row));
+        // End marker always snaps to whole beats regardless of quantize setting
+        double newEnd = std::round (xToBeat (e.position.x, row));
 
-        // Minimum 1 beat (freely movable, not locked to last chord)
-        if (newEnd < quantizeGrid)
-            newEnd = quantizeGrid;
+        if (newEnd < 1.0)
+            newEnd = 1.0;
 
         progression->totalBeats = newEnd;
         repaint();

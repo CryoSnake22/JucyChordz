@@ -399,9 +399,10 @@ void MelodyChartComponent::mouseDrag (const juce::MouseEvent& e)
     if (dragEdge == DragEdge::EndMarker)
     {
         int row = getRowForBeat (melody->totalBeats);
-        double newEnd = snapBeat (xToBeat (e.position.x, row));
-        if (newEnd < quantizeGrid)
-            newEnd = quantizeGrid;
+        // End marker always snaps to whole beats regardless of quantize setting
+        double newEnd = std::round (xToBeat (e.position.x, row));
+        if (newEnd < 1.0)
+            newEnd = 1.0;
         melody->totalBeats = newEnd;
         repaint();
         return;
