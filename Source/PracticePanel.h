@@ -39,6 +39,7 @@ public:
     void stopPractice();
 
     bool isPracticing() const { return practicing; }
+    void setStartEnabled (bool enabled) { startButton.setEnabled (enabled); }
     bool isTimedActive() const { return timedPhase != TimedPhase::Inactive; }
     bool isTimedMode() const { return timedToggle.getToggleState(); }
 

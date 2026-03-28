@@ -500,6 +500,11 @@ void ProgressionLibraryPanel::setConfirmModeVisible (bool v)
 
 //==============================================================================
 
+bool ProgressionLibraryPanel::isEditing() const
+{
+    return panelState != PanelState::Idle;
+}
+
 void ProgressionLibraryPanel::enterIdle()
 {
     if (panelState == PanelState::Recording)
@@ -585,6 +590,9 @@ void ProgressionLibraryPanel::enterRecording()
 void ProgressionLibraryPanel::enterEditing()
 {
     panelState = PanelState::Editing;
+
+    if (onEditStarted)
+        onEditStarted();
 
     setIdleModeVisible (false);
     setEditModeVisible (true);

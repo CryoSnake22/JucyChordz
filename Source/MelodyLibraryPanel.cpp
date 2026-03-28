@@ -461,6 +461,11 @@ void MelodyLibraryPanel::setConfirmModeVisible (bool v)
 
 //==============================================================================
 
+bool MelodyLibraryPanel::isEditing() const
+{
+    return panelState != PanelState::Idle;
+}
+
 void MelodyLibraryPanel::enterIdle()
 {
     if (panelState == PanelState::Recording)
@@ -545,6 +550,9 @@ void MelodyLibraryPanel::enterRecording()
 void MelodyLibraryPanel::enterEditing()
 {
     panelState = PanelState::Editing;
+
+    if (onEditStarted)
+        onEditStarted();
 
     setIdleModeVisible (false);
     setEditModeVisible (true);

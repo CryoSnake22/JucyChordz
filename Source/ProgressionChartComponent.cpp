@@ -112,7 +112,7 @@ int ProgressionChartComponent::getDetailedNoteAreaHeight() const
 
 int ProgressionChartComponent::getEffectiveRowHeight() const
 {
-    if (detailedView && ! editMode)
+    if (detailedView)
         return viewportHeight;  // each row fills one viewport height
     return simpleRowHeight;
 }
@@ -194,6 +194,25 @@ ProgressionChartComponent::DragEdge ProgressionChartComponent::hitTestEdge (
 
     int rh = getEffectiveRowHeight();
 
+    // Check end marker FIRST (priority over chord edges)
+    {
+        double totalBeats = prog->totalBeats;
+        if (totalBeats > 0.0)
+        {
+            int endRow = getRowForBeat (totalBeats);
+            double rowStartBeat = endRow * beatsPerRow;
+            float endX = leftPad + static_cast<float> (totalBeats - rowStartBeat) * getBeatWidth();
+            float endY = static_cast<float> (endRow * (rh + rowGap));
+
+            if (std::abs (pos.x - endX) < edgeHitZone + 2.0f
+                && pos.y >= endY && pos.y <= endY + static_cast<float> (rh))
+            {
+                outChordIndex = -1;
+                return DragEdge::EndMarker;
+            }
+        }
+    }
+
     for (int i = 0; i < static_cast<int> (prog->chords.size()); ++i)
     {
         const auto& chord = prog->chords[static_cast<size_t> (i)];
@@ -219,23 +238,6 @@ ProgressionChartComponent::DragEdge ProgressionChartComponent::hitTestEdge (
                 outChordIndex = i;
                 return DragEdge::Left;
             }
-        }
-    }
-
-    // Check end marker
-    if (prog != nullptr)
-    {
-        double totalBeats = prog->totalBeats;
-        int endRow = getRowForBeat (totalBeats);
-        double rowStartBeat = endRow * beatsPerRow;
-        float endX = leftPad + static_cast<float> (totalBeats - rowStartBeat) * getBeatWidth();
-        float endY = static_cast<float> (endRow * (rh + rowGap));
-
-        if (std::abs (pos.x - endX) < edgeHitZone + 2.0f
-            && pos.y >= endY && pos.y <= endY + rh)
-        {
-            outChordIndex = -1;
-            return DragEdge::EndMarker;
         }
     }
 
@@ -495,7 +497,7 @@ void ProgressionChartComponent::paint (juce::Graphics& g)
         return;
     }
 
-    if (detailedView && ! editMode)
+    if (detailedView)
         paintDetailed (g, prog);
     else
         paintSimple (g, prog);

@@ -271,6 +271,22 @@ MelodyChartComponent::DragEdge MelodyChartComponent::hitTestChordEdge (
     if (mel == nullptr || ! editMode)
         return DragEdge::None;
 
+    // Check end marker FIRST (priority over chord context edges)
+    if (mel->totalBeats > 0.0)
+    {
+        int endRow = getRowForBeat (mel->totalBeats);
+        double endRowStart = endRow * beatsPerRow;
+        float endX = leftPad + static_cast<float> (mel->totalBeats - endRowStart) * getBeatWidth();
+        float endY = static_cast<float> (endRow * (rowHeight() + rowGap));
+
+        if (std::abs (pos.x - endX) < edgeHitZone + 2.0f
+            && pos.y >= endY && pos.y <= endY + static_cast<float> (rowHeight()))
+        {
+            outIndex = -1;
+            return DragEdge::EndMarker;
+        }
+    }
+
     for (int i = 0; i < static_cast<int> (mel->chordContexts.size()); ++i)
     {
         const auto& cc = mel->chordContexts[static_cast<size_t> (i)];
@@ -296,22 +312,6 @@ MelodyChartComponent::DragEdge MelodyChartComponent::hitTestChordEdge (
                 outIndex = i;
                 return DragEdge::Left;
             }
-        }
-    }
-
-    // Check end marker
-    if (mel->totalBeats > 0.0)
-    {
-        int endRow = getRowForBeat (mel->totalBeats);
-        double endRowStart = endRow * beatsPerRow;
-        float endX = leftPad + static_cast<float> (mel->totalBeats - endRowStart) * getBeatWidth();
-        float endY = static_cast<float> (endRow * (rowHeight() + rowGap));
-
-        if (std::abs (pos.x - endX) < edgeHitZone + 2.0f
-            && pos.y >= endY && pos.y <= endY + static_cast<float> (rowHeight()))
-        {
-            outIndex = -1;
-            return DragEdge::EndMarker;
         }
     }
 

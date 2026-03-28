@@ -173,6 +173,15 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
   progressionLibraryPanel.onRecordStarted = onRecord;
   melodyLibraryPanel.onRecordStarted = onRecord;
 
+  // Edit mode → clear practice panel preview (edit chart shows detailed view instead)
+  auto onEdit = [this] {
+    practicePanel.clearChartPreview();
+    keyboard.clearAllColours();
+    keyboard.repaint();
+  };
+  progressionLibraryPanel.onEditStarted = onEdit;
+  melodyLibraryPanel.onEditStarted = onEdit;
+
   // Practice panel
   addAndMakeVisible(practicePanel);
 
@@ -567,6 +576,11 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
   voicingLibraryPanel.setButtonsEnabled(! isPracticing);
   progressionLibraryPanel.setButtonsEnabled(! isPracticing);
   melodyLibraryPanel.setButtonsEnabled(! isPracticing);
+
+  // Disable practice start button during edit/record mode (but keep enabled if already practicing to allow Stop)
+  bool anyEditing = progressionLibraryPanel.isEditing() || melodyLibraryPanel.isEditing();
+  if (! isPracticing)
+    practicePanel.setStartEnabled(! anyEditing);
 
   // Voicing preview auto-off
   if (previewFramesRemaining > 0) {

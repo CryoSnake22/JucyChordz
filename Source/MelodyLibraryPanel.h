@@ -25,7 +25,9 @@ public:
     void refreshStatsChart();
 
     std::function<void (const juce::String& melodyId)> onSelectionChanged;
+    bool isEditing() const;
     std::function<void()> onRecordStarted;
+    std::function<void()> onEditStarted;
     void setButtonsEnabled (bool enabled);
     std::function<void (const std::vector<int>& midiNotes)> onNotePreview;
     std::function<void (const Melody& transposed)> onTransposedPreview;
