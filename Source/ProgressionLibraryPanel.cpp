@@ -418,7 +418,8 @@ void ProgressionLibraryPanel::layoutEditMode (juce::Rectangle<int> area)
     // Chart takes remaining space (viewport scrollable, chart sizes to content)
     editChartViewport.setBounds (area);
     editChart.setViewportHeight (area.getHeight());
-    editChart.setSize (area.getWidth(), juce::jmax (area.getHeight(), editChart.getIdealHeight()));
+    int chartW = area.getWidth() - editChartViewport.getScrollBarThickness();
+    editChart.setSize (chartW, juce::jmax (area.getHeight(), editChart.getIdealHeight()));
 }
 
 void ProgressionLibraryPanel::layoutConfirmMode (juce::Rectangle<int> area)
