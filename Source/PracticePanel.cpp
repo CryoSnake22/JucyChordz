@@ -72,7 +72,7 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
 
     orderCombo.addItem ("Random", 1);
     orderCombo.addItem ("Chromatic", 2);
-    orderCombo.setSelectedId (1, juce::dontSendNotification);
+    orderCombo.setSelectedId (2, juce::dontSendNotification);
     addChildComponent (orderCombo);
 
     timingFeedbackLabel.setFont (juce::FontOptions (13.0f, juce::Font::bold));
@@ -106,14 +106,39 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
         if (chordIdx < 0 || chordIdx >= static_cast<int> (previewProgression.chords.size())) return;
 
         const auto& chord = previewProgression.chords[static_cast<size_t> (chordIdx)];
+        double clickBeat = practiceChart.getLastClickedBeat();
         int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
+
+        // Filter notes by clicked beat — only play/highlight notes active at that beat
+        std::vector<int> activeNotesMidi;
+        std::vector<float> activeVelocities;
         for (size_t i = 0; i < chord.midiNotes.size(); ++i)
         {
-            float vel = (i < chord.midiVelocities.size() && chord.midiVelocities[i] > 0)
-                ? static_cast<float> (chord.midiVelocities[i]) / 127.0f
-                : 0.7f;
-            processorRef.addPreviewMidi (juce::MidiMessage::noteOn (ch, chord.midiNotes[i], vel));
+            double ns = (i < chord.noteStartBeats.size()) ? chord.noteStartBeats[i] : chord.startBeat;
+            double nd = (i < chord.noteDurations.size()) ? chord.noteDurations[i] : chord.durationBeats;
+            if (clickBeat >= ns && clickBeat < ns + nd)
+            {
+                activeNotesMidi.push_back (chord.midiNotes[i]);
+                float vel = (i < chord.midiVelocities.size() && chord.midiVelocities[i] > 0)
+                    ? static_cast<float> (chord.midiVelocities[i]) / 127.0f : 0.7f;
+                activeVelocities.push_back (vel);
+            }
         }
+
+        // If no notes at clicked beat (edge case), fall back to all notes
+        if (activeNotesMidi.empty())
+        {
+            for (size_t i = 0; i < chord.midiNotes.size(); ++i)
+            {
+                activeNotesMidi.push_back (chord.midiNotes[i]);
+                float vel = (i < chord.midiVelocities.size() && chord.midiVelocities[i] > 0)
+                    ? static_cast<float> (chord.midiVelocities[i]) / 127.0f : 0.7f;
+                activeVelocities.push_back (vel);
+            }
+        }
+
+        for (size_t i = 0; i < activeNotesMidi.size(); ++i)
+            processorRef.addPreviewMidi (juce::MidiMessage::noteOn (ch, activeNotesMidi[i], activeVelocities[i]));
 
         // Show chord name in top display
         clickedChordName = chord.getDisplayName();
@@ -121,11 +146,11 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
 
         // Highlight keyboard
         keyboardRef.clearAllColours();
-        for (int note : chord.midiNotes)
+        for (int note : activeNotesMidi)
             keyboardRef.setKeyColour (note, KeyColour::Target);
         keyboardRef.repaint();
 
-        juce::Timer::callAfterDelay (600, [this, ch, notes = chord.midiNotes]() {
+        juce::Timer::callAfterDelay (600, [this, ch, notes = activeNotesMidi]() {
             for (int note : notes)
                 processorRef.addPreviewMidi (juce::MidiMessage::noteOff (ch, note, 0.0f));
         });
@@ -493,16 +518,9 @@ void PracticePanel::startPractice (const juce::String& voicingId)
     nextButton.setEnabled (true);
     playButton.setEnabled (true);
 
-    // Get first challenge
-    if (customMode)
-    {
-        buildCustomKeySequence();
-        currentChallenge = getNextCustomChallenge();
-    }
-    else
-    {
-        currentChallenge = processorRef.spacedRepetition.getNextChallenge (voicingId);
-    }
+    // Get first challenge — always use chromatic sequence by default
+    buildCustomKeySequence();
+    currentChallenge = getNextCustomChallenge();
 
     const auto* voicing = processorRef.voicingLibrary.getVoicing (voicingId);
     if (voicing == nullptr)
@@ -946,10 +964,7 @@ void PracticePanel::enterPlayPhase()
     currentRootColour = juce::Colour (ChordyTheme::successBright);
 
     // Pre-fetch next challenge so we can show "Up next..." immediately
-    if (customMode)
-        nextChallenge = getNextCustomChallenge();
-    else
-        nextChallenge = processorRef.spacedRepetition.getNextChallenge (practicingVoicingId, currentChallenge.keyIndex);
+    nextChallenge = getNextCustomChallenge();
 
     nextRootText = ChordDetector::noteNameFromPitchClass (nextChallenge.keyIndex);
 
@@ -1023,11 +1038,8 @@ void PracticePanel::loadNextChallenge()
     juce::String vid = practicingVoicingId.isNotEmpty() ? practicingVoicingId
                                                         : currentChallenge.voicingId;
 
-    // Get next challenge without rebuilding custom sequence
-    if (customMode)
-        currentChallenge = getNextCustomChallenge();
-    else
-        currentChallenge = processorRef.spacedRepetition.getNextChallenge (vid, currentChallenge.keyIndex);
+    // Get next challenge using chromatic sequence
+    currentChallenge = getNextCustomChallenge();
 
     const auto* voicing = processorRef.voicingLibrary.getVoicing (vid);
     if (voicing == nullptr)
@@ -1292,7 +1304,18 @@ void PracticePanel::buildCustomKeySequence()
     customKeySequence.assign (customAllowedKeys.begin(), customAllowedKeys.end());
 
     if (rootOrder == RootOrder::Random)
+    {
         std::shuffle (customKeySequence.begin(), customKeySequence.end(), rng);
+    }
+    else if (rootOrder == RootOrder::Chromatic && customKeySequence.size() > 2)
+    {
+        // Build up-and-back pattern: C, C#, ..., B, Bb, ..., C#
+        auto descending = customKeySequence;
+        descending.erase (descending.begin());      // remove first (avoid repeat at top)
+        descending.pop_back();                        // remove last (avoid repeat at bottom)
+        std::reverse (descending.begin(), descending.end());
+        customKeySequence.insert (customKeySequence.end(), descending.begin(), descending.end());
+    }
 
     customKeyIndex = 0;
 }
@@ -1414,19 +1437,10 @@ void PracticePanel::startProgressionPractice (const juce::String& progressionId)
 
     headerLabel.setText ("Practicing: " + prog->name, juce::dontSendNotification);
 
-    // Get the first key to practice
-    if (customMode)
-    {
-        buildCustomKeySequence();
-        auto challenge = getNextCustomChallenge();
-        loadProgressionChallenge (challenge.keyIndex);
-    }
-    else
-    {
-        // Use SR engine with progression ID to pick most overdue key
-        auto challenge = processorRef.spacedRepetition.getNextChallenge (progressionId);
-        loadProgressionChallenge (challenge.keyIndex);
-    }
+    // Get the first key to practice — always use chromatic sequence by default
+    buildCustomKeySequence();
+    auto challenge = getNextCustomChallenge();
+    loadProgressionChallenge (challenge.keyIndex);
 }
 
 void PracticePanel::loadProgressionChallenge (int keyIndex)
@@ -1512,18 +1526,7 @@ void PracticePanel::advanceProgressionChord()
             quality >= 3 ? juce::Colour (ChordyTheme::success) : juce::Colour (ChordyTheme::danger));
 
         // Get next key
-        int nextKey;
-        if (customMode)
-        {
-            auto challenge = getNextCustomChallenge();
-            nextKey = challenge.keyIndex;
-        }
-        else
-        {
-            auto challenge = processorRef.spacedRepetition.getNextChallenge (practicingProgressionId, transposedProgression.keyPitchClass);
-            nextKey = challenge.keyIndex;
-        }
-
+        int nextKey = getNextCustomChallenge().keyIndex;
         loadProgressionChallenge (nextKey);
         return;
     }
@@ -1658,12 +1661,7 @@ void PracticePanel::updateProgressionPractice (const std::vector<int>& activeNot
             lastBeatInSequence = -1;
             progressionTimedScored.clear();
 
-            int nextKey;
-            if (customMode)
-                nextKey = getNextCustomChallenge().keyIndex;
-            else
-                nextKey = processorRef.spacedRepetition.getNextChallenge (practicingProgressionId, transposedProgression.keyPitchClass).keyIndex;
-
+            int nextKey = getNextCustomChallenge().keyIndex;
             loadProgressionChallenge (nextKey);
             return;
         }
@@ -1782,6 +1780,36 @@ void PracticePanel::updateProgressionPractice (const std::vector<int>& activeNot
                 timingFeedbackLabel.setColour (juce::Label::textColourId, qualityColour);
             }
         }
+        // Check for early hit on the NEXT chord (anticipation)
+        if (! activeNotes.empty() && targetChordIdx >= 0
+            && progressionTimedScored.count (targetChordIdx) != 0)
+        {
+            int nextCI = targetChordIdx + 1;
+            if (nextCI < static_cast<int> (transposedProgression.chords.size())
+                && progressionTimedScored.count (nextCI) == 0)
+            {
+                const auto& nextChord = transposedProgression.chords[static_cast<size_t> (nextCI)];
+                if (nextChord.startBeat - progressBeat < 1.0)
+                {
+                    std::set<int> nextTargetPC, playedPC2;
+                    for (int n : nextChord.midiNotes) nextTargetPC.insert (n % 12);
+                    for (int n : activeNotes) playedPC2.insert (n % 12);
+
+                    if (playedPC2 == nextTargetPC)
+                    {
+                        progressionTimedScored.insert (nextCI);
+                        practiceChart.setAllChordNoteStates (nextCI, ProgressionChartComponent::NoteState::Correct);
+                        double beatOffset = std::abs (progressBeat - nextChord.startBeat);
+                        int quality = computeQuality (beatOffset, false);
+                        progressionQualitySum += quality;
+                        if (quality >= 3) progressionChordsCorrect++;
+
+                        feedbackLabel.setText ("Correct!", juce::dontSendNotification);
+                        feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
+                    }
+                }
+            }
+        }
         else if (activeNotes.empty() && targetChordIdx >= 0
                  && progressionTimedScored.count (targetChordIdx) == 0)
         {
@@ -1892,18 +1920,9 @@ void PracticePanel::startMelodyPractice (const juce::String& melodyId)
 
     headerLabel.setText ("Practicing: " + mel->name, juce::dontSendNotification);
 
-    // Get the first key to practice
-    int keyIndex;
-    if (customMode)
-    {
-        buildCustomKeySequence();
-        keyIndex = getNextCustomChallenge().keyIndex;
-    }
-    else
-    {
-        keyIndex = processorRef.spacedRepetition.getNextChallenge (melodyId).keyIndex;
-    }
-
+    // Get the first key to practice — always use chromatic sequence by default
+    buildCustomKeySequence();
+    int keyIndex = getNextCustomChallenge().keyIndex;
     loadMelodyChallenge (keyIndex);
 }
 
@@ -2121,12 +2140,7 @@ void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
             melodyTimedScored.clear();
             melodyTimedQualitySum = 0;
 
-            int nextKey;
-            if (customMode)
-                nextKey = getNextCustomChallenge().keyIndex;
-            else
-                nextKey = processorRef.spacedRepetition.getNextChallenge (practicingMelodyId, transposedMelody.keyPitchClass).keyIndex;
-
+            int nextKey = getNextCustomChallenge().keyIndex;
             loadMelodyChallenge (nextKey);
             return;
         }
@@ -2190,14 +2204,16 @@ void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
                 && melodyTimedScored.count (nextIdx) == 0
                 && (candidates.empty() || nextIdx != candidates[0]))
             {
-                // Only allow anticipation within 1 beat of the next note's start
+                // Only allow anticipation within half a beat of the next note's start
                 const auto& nextNote = transposedMelody.notes[static_cast<size_t> (nextIdx)];
-                if (nextNote.startBeat - progressBeat < 1.0)
+                if (nextNote.startBeat - progressBeat < 0.5)
                     candidates.push_back (nextIdx);
             }
 
+            bool scored = false;
             for (int candIdx : candidates)
             {
+                if (scored) break;
                 const auto& note = transposedMelody.notes[static_cast<size_t> (candIdx)];
                 int candPC = ((melodyKeyRootMidi + note.intervalFromKeyRoot) % 12 + 12) % 12;
 
@@ -2206,6 +2222,7 @@ void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
                     if (pc == candPC)
                     {
                         melodyTimedScored.insert (candIdx);
+                        scored = true;
                         practiceMLChart.setNoteState (candIdx, MelodyChartComponent::NoteState::Correct);
 
                         // Use absolute offset from note start (negative = early, positive = late)

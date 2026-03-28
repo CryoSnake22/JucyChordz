@@ -524,7 +524,7 @@ void ProgressionLibraryPanel::enterIdle()
 
     resized();
     repaint();
-    progressionList.updateContent();
+    updateDisplayedProgressions();
 }
 
 void ProgressionLibraryPanel::setButtonsEnabled (bool enabled)
@@ -733,9 +733,7 @@ void ProgressionLibraryPanel::onStopRecording()
     pendingProgression.rawMidi = rawMidi;
     pendingProgression.chords = chords;
 
-    currentQuantizeResolution = 1.0;
-    pendingProgression.chords = ProgressionRecorder::quantize (
-        chords, currentQuantizeResolution, totalBeats);
+    currentQuantizeResolution = 0.0;
 
     double maxEnd = 0.0;
     for (const auto& c : pendingProgression.chords)
@@ -913,7 +911,7 @@ void ProgressionLibraryPanel::onEditExisting()
 
     // Copy into pending for editing
     pendingProgression = *prog;
-    currentQuantizeResolution = 1.0;
+    currentQuantizeResolution = 0.0;
     enterEditing();
 }
 

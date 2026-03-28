@@ -600,6 +600,12 @@ void AudioPluginAudioProcessor::startMelodyPlayback (const Melody& melody, int k
   melodyPlaybackSamplePos = 0.0;
   melodyPlaybackCCIndex = 0;
   melodyPlaybackBeat.store(0.0, std::memory_order_relaxed);
+
+  // Sync to metronome: turn it on and reset beat position to 0
+  if (auto* param = apvts.getParameter("metronomeOn"))
+    param->setValueNotifyingHost(1.0f);
+  tempoEngine.resetBeatPosition();
+
   melodyPlaybackActive.store(true, std::memory_order_relaxed);
 }
 
@@ -614,6 +620,9 @@ void AudioPluginAudioProcessor::stopMelodyPlayback() {
     melodyPlaybackNoteIndex = -1;
     playbackNotesLow.store(0, std::memory_order_relaxed);
     playbackNotesHigh.store(0, std::memory_order_relaxed);
+
+    if (auto* param = apvts.getParameter("metronomeOn"))
+      param->setValueNotifyingHost(0.0f);
   }
 }
 

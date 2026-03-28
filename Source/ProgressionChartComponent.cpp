@@ -287,6 +287,11 @@ void ProgressionChartComponent::mouseDown (const juce::MouseEvent& e)
 
     int hit = hitTestChord (e.position);
     selectedChordIndex = hit;
+
+    // Record the beat position of the click for note filtering
+    int row = static_cast<int> (e.position.y) / (getEffectiveRowHeight() + rowGap);
+    lastClickedBeat = xToBeat (e.position.x, row);
+
     repaint();
 
     if (onChordSelected)

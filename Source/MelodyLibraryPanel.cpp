@@ -485,7 +485,7 @@ void MelodyLibraryPanel::enterIdle()
 
     resized();
     repaint();
-    melodyList.updateContent();
+    updateDisplayedMelodies();
 }
 
 void MelodyLibraryPanel::setButtonsEnabled (bool enabled)
@@ -883,7 +883,7 @@ void MelodyLibraryPanel::onEditExisting()
         return;
 
     pendingMelody = *mel;
-    currentQuantizeResolution = 0.5;
+    currentQuantizeResolution = 0.0;
     enterEditing();
 }
 

@@ -100,11 +100,20 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
 
   // Progression selection → practice panel
   progressionLibraryPanel.onSelectionChanged = [this](const juce::String& progressionId) {
+    keyboard.clearAllColours();
+    keyboard.repaint();
     if (libraryTabs.getCurrentTabIndex() == 1)
     {
       practicePanel.setSelectedProgressionId(progressionId);
-      const auto* prog = processorRef.progressionLibrary.getProgression(progressionId);
-      practicePanel.showProgressionPreview(prog);
+      if (progressionId.isNotEmpty())
+      {
+        const auto* prog = processorRef.progressionLibrary.getProgression(progressionId);
+        practicePanel.showProgressionPreview(prog);
+      }
+      else
+      {
+        practicePanel.clearChartPreview();
+      }
     }
   };
 
@@ -118,11 +127,20 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
   libraryTabs.addTab("Progressions", juce::Colour(ChordyTheme::bgSurface), &progressionLibraryPanel, false);
   // Melody selection → practice panel
   melodyLibraryPanel.onSelectionChanged = [this](const juce::String& melodyId) {
+    keyboard.clearAllColours();
+    keyboard.repaint();
     if (libraryTabs.getCurrentTabIndex() == 2)
     {
       practicePanel.setSelectedMelodyId(melodyId);
-      const auto* mel = processorRef.melodyLibrary.getMelody(melodyId);
-      practicePanel.showMelodyPreview(mel);
+      if (melodyId.isNotEmpty())
+      {
+        const auto* mel = processorRef.melodyLibrary.getMelody(melodyId);
+        practicePanel.showMelodyPreview(mel);
+      }
+      else
+      {
+        practicePanel.clearChartPreview();
+      }
     }
   };
 

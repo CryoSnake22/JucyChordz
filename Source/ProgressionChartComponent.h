@@ -18,6 +18,7 @@ public:
     void setQuantizeGrid (double resolution) { quantizeGrid = resolution; }
 
     int getSelectedChord() const { return selectedChordIndex; }
+    double getLastClickedBeat() const { return lastClickedBeat; }
     int getIdealHeight() const;
     void setViewportHeight (int height);
 
@@ -47,6 +48,7 @@ private:
     const Progression* getProgression() const { return progression != nullptr ? progression : progressionReadOnly; }
 
     double cursorBeat = -1.0;
+    double lastClickedBeat = -1.0;
     int selectedChordIndex = -1;
     bool editMode = false;
     bool detailedView = true;
