@@ -66,7 +66,7 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
           param->setValueNotifyingHost(1.0f);
       practicePanel.startPractice(voicingId);
     } else if (voicingId.isNotEmpty()) {
-      // Preview: highlight original voicing notes on keyboard + play via synth
+      // Preview: highlight original voicing notes on keyboard + play via synth + show chart
       keyboard.clearAllColours();
       const auto *v = processorRef.voicingLibrary.getVoicing(voicingId);
       if (v != nullptr) {
@@ -75,8 +75,10 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
           keyboard.setKeyColour(note, KeyColour::Target);
         startVoicingPreview(vnotes, v->velocities);
         practicePanel.setClickedChordName(v->name, 40);
+        practicePanel.showVoicingChartPreview(voicingId);
       }
       keyboard.repaint();
+      keyboardHighlightFramesRemaining = keyboardHighlightTimeout;
     } else {
       keyboard.clearAllColours();
       keyboard.repaint();
@@ -88,6 +90,7 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
     auto result = ChordDetector::detect(vnotes);
     if (result.isValid())
       practicePanel.setClickedChordName(result.displayName, 40);
+    keyboardHighlightFramesRemaining = keyboardHighlightTimeout;
   };
 
   // Progression chord preview → highlight keyboard
@@ -562,16 +565,24 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
     keyboard.repaint();
   }
 
-  // Update preview chart cursor during playback (non-practice)
+  // Update preview chart cursor and note highlighting during playback (non-practice)
   if (!practicePanel.isPracticing()) {
-    if (processorRef.isPlayingProgression())
-      practicePanel.showProgressionCursor(processorRef.getPlaybackBeatPosition());
-    else if (processorRef.isPlayingMelody())
-      practicePanel.showMelodyCursor(processorRef.getMelodyPlaybackBeat());
-    else {
+    if (processorRef.isPlayingProgression()) {
+      double beat = processorRef.getPlaybackBeatPosition();
+      practicePanel.showProgressionCursor(beat);
+      practicePanel.highlightNotesAtBeat(beat);
+    } else if (processorRef.isPlayingMelody()) {
+      double beat = processorRef.getMelodyPlaybackBeat();
+      practicePanel.showMelodyCursor(beat);
+      practicePanel.highlightMelodyNotesAtBeat(beat);
+    } else {
       practicePanel.showProgressionCursor(-1.0);
       practicePanel.showMelodyCursor(-1.0);
     }
+
+    // Detect exercise preview stop (progression finished)
+    if (practicePanel.isExercisePreviewActive() && !processorRef.isPlayingProgression())
+      practicePanel.stopExercisePreview();
   }
 
   // Update practice mode
@@ -599,6 +610,14 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
       stopVoicingPreview();
   }
 
+  // Keyboard highlight auto-clear when browsing voicings
+  if (keyboardHighlightFramesRemaining > 0 && ! practicePanel.isPracticing()) {
+    if (--keyboardHighlightFramesRemaining == 0) {
+      keyboard.clearAllColours();
+      keyboard.repaint();
+    }
+  }
+
   // Update beat indicator
   beatIndicator.setBeatInfo(
       processorRef.tempoEngine.getBeatNumber(),
@@ -620,11 +639,17 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
     keyboard.clearAllColours();
     keyboard.repaint();
 
+    // Stop exercise preview on any tab switch
+    practicePanel.stopExercisePreview();
+
     if (currentTab == 0) {
-      // Switched to Voicings — no chart preview
+      // Switched to Voicings — show voicing chart preview if one is selected
       auto vid = voicingLibraryPanel.getSelectedVoicingId();
       practicePanel.setSelectedVoicingId(vid);
-      practicePanel.clearChartPreview();
+      if (vid.isNotEmpty())
+        practicePanel.showVoicingChartPreview(vid);
+      else
+        practicePanel.clearChartPreview();
     } else if (currentTab == 1) {
       // Switched to Progressions — show chart preview
       auto pid = progressionLibraryPanel.getSelectedProgressionId();
@@ -651,16 +676,40 @@ void AudioPluginAudioProcessorEditor::startVoicingPreview (const std::vector<int
 
   int channel = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
 
-  // Send MIDI directly to synth with recorded velocities
+  // Build a 1-chord progression and use the playback engine for cursor + highlighting
+  Progression prog;
+  prog.id = "voicing_preview_play";
+  prog.totalBeats = 1.0;
+  prog.bpm = processorRef.tempoEngine.getEffectiveBpm();
+
+  ProgressionChord chord;
+  chord.startBeat = 0.0;
+  chord.durationBeats = 1.0;
+
   for (size_t i = 0; i < notes.size(); ++i)
   {
     float vel = (i < velocities.size() && velocities[i] > 0)
         ? static_cast<float>(velocities[i]) / 127.0f
         : 0.8f;
-    processorRef.addPreviewMidi (juce::MidiMessage::noteOn (channel, notes[i], vel));
+    chord.midiNotes.push_back (notes[i]);
+    chord.midiVelocities.push_back (static_cast<int> (vel * 127.0f));
+    chord.noteStartBeats.push_back (0.0);
+    chord.noteDurations.push_back (1.0);
+
+    auto noteOn = juce::MidiMessage::noteOn (channel, notes[i], vel);
+    noteOn.setTimeStamp (0.0);
+    prog.rawMidi.addEvent (noteOn, 0);
+    auto noteOff = juce::MidiMessage::noteOff (channel, notes[i], 0.0f);
+    noteOff.setTimeStamp (0.95);
+    prog.rawMidi.addEvent (noteOff, 0);
   }
 
-  // Show green highlights on keyboard
+  prog.chords.push_back (std::move (chord));
+  prog.rawMidi.sort();
+
+  processorRef.startProgressionPlayback (prog);
+
+  // Show highlights on keyboard
   keyboard.clearAllColours();
   for (int note : notes)
     keyboard.setKeyColour (note, KeyColour::Target);
@@ -723,8 +772,18 @@ bool AudioPluginAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
 
     // Library mode: space = play/stop based on active tab
     int tab = libraryTabs.getCurrentTabIndex();
-    if (tab == 0) // Voicings — play selected voicing
+    if (tab == 0) // Voicings
     {
+      // If exercise preview is available (Follow/Scale custom mode), play/stop exercise
+      if (practicePanel.canPlayExercisePreview())
+      {
+        if (practicePanel.isExercisePreviewActive())
+          practicePanel.stopExercisePreview();
+        else
+          practicePanel.playExercisePreview();
+        return true;
+      }
+      // Otherwise play selected voicing
       auto id = voicingLibraryPanel.getSelectedVoicingId();
       if (id.isNotEmpty())
       {

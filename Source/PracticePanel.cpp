@@ -101,9 +101,19 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
     for (int i = 0; i < static_cast<int> (ScaleType::NumScaleTypes); ++i)
         scalePickerCombo.addItem (ScaleModel::getScaleName (static_cast<ScaleType> (i)), i + 1);
     scalePickerCombo.setSelectedId (1, juce::dontSendNotification);
+    scalePickerCombo.onChange = [this] { buildExercisePreviewProgression(); };
     addChildComponent (scalePickerCombo);
 
+    melodyPickerCombo.onChange = [this] { buildExercisePreviewProgression(); };
     addChildComponent (melodyPickerCombo);
+
+    exercisePlayButton.onClick = [this] {
+        if (exercisePreviewPlaying)
+            stopExercisePreview();
+        else
+            playExercisePreview();
+    };
+    addChildComponent (exercisePlayButton);
 
     timingFeedbackLabel.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     timingFeedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::textTertiary));
@@ -321,12 +331,14 @@ void PracticePanel::resized()
         orderCombo.setBounds (controlRow);
         area.removeFromBottom (2);
 
-        // Extra row for Follow/Scale: scale picker, follow source, or melody picker
+        // Extra row for Follow/Scale: scale picker, follow source, or melody picker + Play button
         if (isFollow)
         {
             auto pickerRow = area.removeFromBottom (22);
             followSourceCombo.setBounds (pickerRow.removeFromLeft (80));
             pickerRow.removeFromLeft (4);
+            exercisePlayButton.setBounds (pickerRow.removeFromRight (45));
+            pickerRow.removeFromRight (4);
             if (isMelodySource)
                 melodyPickerCombo.setBounds (pickerRow);
             else
@@ -336,6 +348,8 @@ void PracticePanel::resized()
         else if (isScale)
         {
             auto pickerRow = area.removeFromBottom (22);
+            exercisePlayButton.setBounds (pickerRow.removeFromRight (45));
+            pickerRow.removeFromRight (4);
             scalePickerCombo.setBounds (pickerRow);
             area.removeFromBottom (2);
         }
@@ -466,6 +480,11 @@ void PracticePanel::setSelectedVoicingId (const juce::String& id)
     // Enable Follow/Scale options for voicing practice
     orderCombo.setItemEnabled (3, true);
     orderCombo.setItemEnabled (4, true);
+
+    // Rebuild exercise preview if in Follow/Scale mode
+    int orderId = orderCombo.getSelectedId();
+    if (showingKeySelector && (orderId == 3 || orderId == 4))
+        buildExercisePreviewProgression();
 }
 
 void PracticePanel::setSelectedProgressionId (const juce::String& id)
@@ -650,6 +669,7 @@ void PracticePanel::onStartStop()
 
 void PracticePanel::startPractice (const juce::String& voicingId)
 {
+    stopExercisePreview();
     practicing = true;
     practicingVoicingId = voicingId;
     challengeCompleted = false;
@@ -867,6 +887,89 @@ void PracticePanel::showMelodyCursor (double beat)
 {
     if (showingMelPreview)
         practiceMLChart.setCursorBeat (beat);
+}
+
+void PracticePanel::showVoicingChartPreview (const juce::String& voicingId)
+{
+    const auto* v = processorRef.voicingLibrary.getVoicing (voicingId);
+    if (v == nullptr)
+    {
+        clearChartPreview();
+        return;
+    }
+
+    // Don't overwrite exercise preview chart
+    int orderId = orderCombo.getSelectedId();
+    if (showingKeySelector && (orderId == 3 || orderId == 4))
+        return;
+
+    auto notes = VoicingLibrary::transposeToKey (*v, v->octaveReference);
+
+    Progression prog;
+    prog.id = "voicing_preview";
+    prog.name = v->name;
+    prog.keyPitchClass = v->rootPitchClass;
+    prog.bpm = processorRef.tempoEngine.getEffectiveBpm();
+    prog.totalBeats = 1.0;
+
+    ProgressionChord chord;
+    chord.midiNotes.assign (notes.begin(), notes.end());
+    chord.startBeat = 0.0;
+    chord.durationBeats = 1.0;
+
+    for (size_t i = 0; i < notes.size(); ++i)
+    {
+        int vel = (i < v->velocities.size() && v->velocities[i] > 0) ? v->velocities[i] : 100;
+        chord.midiVelocities.push_back (vel);
+        chord.noteStartBeats.push_back (0.0);
+        chord.noteDurations.push_back (1.0);
+    }
+
+    chord.name = v->name;
+    chord.rootPitchClass = v->rootPitchClass;
+    chord.quality = v->quality;
+
+    prog.chords.push_back (std::move (chord));
+    showProgressionPreview (&prog);
+}
+
+void PracticePanel::highlightNotesAtBeat (double beat)
+{
+    if (! showingProgPreview || beat < 0.0) return;
+
+    // Set Target (amber) on notes active at the current beat, Default on others
+    for (int ci = 0; ci < static_cast<int> (previewProgression.chords.size()); ++ci)
+    {
+        const auto& chord = previewProgression.chords[static_cast<size_t> (ci)];
+        for (int ni = 0; ni < static_cast<int> (chord.midiNotes.size()); ++ni)
+        {
+            double nStart = ni < static_cast<int> (chord.noteStartBeats.size())
+                ? chord.noteStartBeats[static_cast<size_t> (ni)] : chord.startBeat;
+            double nDur = ni < static_cast<int> (chord.noteDurations.size())
+                ? chord.noteDurations[static_cast<size_t> (ni)] : chord.durationBeats;
+
+            bool active = (beat >= nStart && beat < nStart + nDur);
+            practiceChart.setNoteState (ci, ni,
+                active ? ProgressionChartComponent::NoteState::Target
+                       : ProgressionChartComponent::NoteState::Default);
+        }
+    }
+    practiceChart.repaint();
+}
+
+void PracticePanel::highlightMelodyNotesAtBeat (double beat)
+{
+    if (! showingMelPreview || beat < 0.0) return;
+
+    for (int ni = 0; ni < static_cast<int> (previewMelody.notes.size()); ++ni)
+    {
+        const auto& note = previewMelody.notes[static_cast<size_t> (ni)];
+        bool active = (beat >= note.startBeat && beat < note.startBeat + note.durationBeats);
+        practiceMLChart.setNoteState (ni,
+            active ? MelodyChartComponent::NoteState::Target
+                   : MelodyChartComponent::NoteState::Default);
+    }
+    practiceMLChart.repaint();
 }
 
 // --- Practice update (called from 60Hz timer) ---
@@ -1444,6 +1547,13 @@ void PracticePanel::onCustomToggle()
         showingKeySelector ? juce::Colour (ChordyTheme::accentMuted)
                            : getLookAndFeel().findColour (juce::TextButton::buttonColourId));
 
+    // Stop exercise preview and clear chart when closing custom panel
+    if (! showingKeySelector)
+    {
+        stopExercisePreview();
+        clearChartPreview();
+    }
+
     resized();
     repaint();
 }
@@ -1484,6 +1594,15 @@ void PracticePanel::updateFollowScaleVisibility()
 
     if (isFollow && isMelodySource)
         populateMelodyPicker();
+
+    // Exercise play button: visible in Follow/Scale modes
+    exercisePlayButton.setVisible (showingKeySelector && (isFollow || isScale));
+
+    // Rebuild exercise chart preview when mode changes
+    if (showingKeySelector && (isFollow || isScale))
+        buildExercisePreviewProgression();
+    else if (showingKeySelector)
+        clearChartPreview();
 }
 
 void PracticePanel::buildCustomKeySequence()
@@ -2738,4 +2857,190 @@ void PracticePanel::populateMelodyPicker()
 
     if (melodyPickerCombo.getNumItems() > 0)
         melodyPickerCombo.setSelectedId (1, juce::dontSendNotification);
+}
+
+// --- Exercise preview ---
+
+bool PracticePanel::canPlayExercisePreview() const
+{
+    if (practicing) return false;
+    int orderId = orderCombo.getSelectedId();
+    if (orderId != 3 && orderId != 4) return false;
+    return selectedVoicingId.isNotEmpty()
+        && processorRef.voicingLibrary.getVoicing (selectedVoicingId) != nullptr;
+}
+
+std::vector<std::vector<int>> PracticePanel::buildExerciseNoteSequence (int chromaticKey)
+{
+    const auto* voicing = processorRef.voicingLibrary.getVoicing (selectedVoicingId);
+    if (voicing == nullptr) return {};
+
+    int orderId = orderCombo.getSelectedId();
+    auto scaleType = static_cast<ScaleType> (scalePickerCombo.getSelectedId() - 1);
+    int octRef = voicing->octaveReference;
+
+    // Compute baseMidi for the target chromatic key
+    int semitoneShift = chromaticKey - (octRef % 12);
+    if (semitoneShift < -6) semitoneShift += 12;
+    if (semitoneShift > 6) semitoneShift -= 12;
+    int baseMidi = octRef + semitoneShift;
+
+    std::vector<std::vector<int>> sequence;
+
+    if (orderId == 3) // Follow
+    {
+        bool isMelody = followSourceCombo.getSelectedId() == 2;
+        if (isMelody)
+        {
+            int melIdx = melodyPickerCombo.getSelectedId() - 1;
+            const auto& melodies = processorRef.melodyLibrary.getAllMelodies();
+            if (melIdx < 0 || melIdx >= static_cast<int> (melodies.size())) return {};
+            const auto* mel = processorRef.melodyLibrary.getMelody (melodies[static_cast<size_t> (melIdx)].id);
+            if (mel == nullptr) return {};
+            auto midiSeq = ScaleModel::buildMelodyFollowSequence (*mel, baseMidi);
+            for (int rootMidi : midiSeq)
+                sequence.push_back (VoicingLibrary::transposeToKey (*voicing, rootMidi));
+        }
+        else
+        {
+            auto intervals = ScaleModel::getScaleIntervals (scaleType);
+            // Build up-and-back semitone offsets including root at bottom
+            std::vector<int> offsets;
+            for (int si : intervals) offsets.push_back (si);
+            offsets.push_back (12);
+            for (int i = static_cast<int> (intervals.size()) - 1; i >= 0; --i)
+                offsets.push_back (intervals[static_cast<size_t> (i)]);
+
+            for (int offset : offsets)
+                sequence.push_back (VoicingLibrary::transposeToKey (*voicing, baseMidi + offset));
+        }
+    }
+    else if (orderId == 4) // Scale
+    {
+        auto scaleIntervals = ScaleModel::getScaleIntervals (scaleType);
+        int numDeg = static_cast<int> (scaleIntervals.size());
+        auto degreeSeq = ScaleModel::buildScaleDegreeUpAndBack (numDeg);
+
+        for (int deg : degreeSeq)
+            sequence.push_back (ScaleModel::diatonicTranspose (*voicing, scaleType,
+                                                                chromaticKey, deg, baseMidi));
+    }
+
+    return sequence;
+}
+
+Progression PracticePanel::buildExerciseProgression (int chromaticKey)
+{
+    Progression prog;
+    const auto* voicing = processorRef.voicingLibrary.getVoicing (selectedVoicingId);
+    if (voicing == nullptr) return prog;
+
+    int key = (chromaticKey >= 0) ? chromaticKey : voicing->rootPitchClass;
+    auto noteSeq = buildExerciseNoteSequence (key);
+    if (noteSeq.empty()) return prog;
+
+    // Use voicing's recorded velocities (cycle if sequence is longer)
+    const auto& vels = voicing->velocities;
+
+    prog.id = "exercise_preview";
+    prog.name = "Exercise Preview";
+    prog.keyPitchClass = key;
+    prog.bpm = processorRef.tempoEngine.getEffectiveBpm();
+    prog.timeSignatureNum = 4;
+    prog.timeSignatureDen = 4;
+
+    int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
+    double beat = 0.0;
+
+    for (const auto& notes : noteSeq)
+    {
+        ProgressionChord chord;
+        chord.midiNotes.assign (notes.begin(), notes.end());
+        chord.startBeat = beat;
+        chord.durationBeats = 1.0;
+
+        // Apply voicing velocities to each note
+        for (size_t i = 0; i < notes.size(); ++i)
+        {
+            int vel = (i < vels.size() && vels[i] > 0) ? vels[i] : 100;
+            chord.midiVelocities.push_back (vel);
+            chord.noteStartBeats.push_back (beat);
+            chord.noteDurations.push_back (1.0);
+
+            // Build rawMidi for playback engine (timestamps are beat floats, not ticks)
+            float fVel = static_cast<float> (vel) / 127.0f;
+            auto noteOn = juce::MidiMessage::noteOn (ch, notes[i], fVel);
+            noteOn.setTimeStamp (beat);
+            prog.rawMidi.addEvent (noteOn, 0);
+            auto noteOff = juce::MidiMessage::noteOff (ch, notes[i], 0.0f);
+            noteOff.setTimeStamp (beat + 0.95);
+            prog.rawMidi.addEvent (noteOff, 0);
+        }
+
+        auto result = ChordDetector::detect (notes);
+        chord.name = result.isValid() ? result.displayName : "?";
+        chord.rootPitchClass = result.isValid() ? result.rootPitchClass : 0;
+        chord.quality = result.isValid() ? result.quality : ChordQuality::Unknown;
+
+        prog.chords.push_back (std::move (chord));
+        beat += 1.0;
+    }
+
+    prog.totalBeats = beat;
+    prog.rawMidi.sort();
+    return prog;
+}
+
+void PracticePanel::buildExercisePreviewProgression()
+{
+    if (! canPlayExercisePreview())
+    {
+        clearChartPreview();
+        return;
+    }
+
+    auto prog = buildExerciseProgression (-1);
+    if (prog.chords.empty())
+    {
+        clearChartPreview();
+        return;
+    }
+
+    showProgressionPreview (&prog);
+}
+
+void PracticePanel::playExercisePreview()
+{
+    playExerciseInKey (-1);
+}
+
+void PracticePanel::playExerciseInKey (int chromaticKey)
+{
+    if (! canPlayExercisePreview()) return;
+
+    stopExercisePreview();
+
+    auto prog = buildExerciseProgression (chromaticKey);
+    if (prog.chords.empty()) return;
+
+    // Show the chart for this key
+    showProgressionPreview (&prog);
+
+    // Use the processor's progression playback engine for smooth cursor
+    processorRef.startProgressionPlayback (prog);
+
+    exercisePreviewPlaying = true;
+    exercisePlayButton.setButtonText ("Stop");
+}
+
+void PracticePanel::stopExercisePreview()
+{
+    if (! exercisePreviewPlaying) return;
+
+    processorRef.stopProgressionPlayback();
+
+    exercisePreviewPlaying = false;
+    exercisePlayButton.setButtonText ("Play");
+    keyboardRef.clearAllColours();
+    keyboardRef.repaint();
 }

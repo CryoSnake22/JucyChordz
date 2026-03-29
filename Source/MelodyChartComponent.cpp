@@ -585,12 +585,14 @@ void MelodyChartComponent::paint (juce::Graphics& g)
         NoteState state = (stateIt != noteStates.end()) ? stateIt->second : NoteState::Default;
 
         juce::uint32 noteColour;
-        bool isTarget = (i == highlightedNoteIndex && (state == NoteState::Default || state == NoteState::Target));
+        bool isTarget = (state == NoteState::Target)
+            || (i == highlightedNoteIndex && state == NoteState::Default);
         switch (state)
         {
             case NoteState::Correct: noteColour = ChordyTheme::melodyNoteCorrect; break;
             case NoteState::Missed:  noteColour = ChordyTheme::melodyNoteMissed; break;
-            default:                 noteColour = ChordyTheme::melodyNoteBg; break;
+            case NoteState::Target:
+            case NoteState::Default: noteColour = ChordyTheme::melodyNoteBg; break;
         }
 
         for (int row = startRow; row <= endRow; ++row)

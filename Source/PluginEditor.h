@@ -105,6 +105,10 @@ private:
   int previewFramesRemaining = 0;
   static constexpr int previewDurationFrames = 30; // ~0.5s hold, then release envelope fades
 
+  // Keyboard highlight auto-clear when browsing voicings (~4s at 60Hz)
+  int keyboardHighlightFramesRemaining = 0;
+  static constexpr int keyboardHighlightTimeout = 240;
+
   void startVoicingPreview (const std::vector<int>& notes, const std::vector<int>& velocities = {});
   void stopVoicingPreview();
 

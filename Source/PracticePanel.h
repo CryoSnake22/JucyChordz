@@ -43,6 +43,10 @@ public:
     void setStartEnabled (bool enabled) { startButton.setEnabled (enabled); }
     bool isTimedActive() const { return timedPhase != TimedPhase::Inactive; }
     bool isTimedMode() const { return timedToggle.getToggleState(); }
+    bool isExercisePreviewActive() const { return exercisePreviewPlaying; }
+    bool canPlayExercisePreview() const;
+    void playExercisePreview();
+    void stopExercisePreview();
 
     // Get current practice display for the main chord area above the keyboard
     juce::String getCurrentRootText() const { return currentRootText; }
@@ -61,6 +65,9 @@ public:
     void clearChartPreview();
     void showProgressionCursor (double beat);
     void showMelodyCursor (double beat);
+    void highlightNotesAtBeat (double beat);
+    void highlightMelodyNotesAtBeat (double beat);
+    void showVoicingChartPreview (const juce::String& voicingId);
     juce::String getPlaybackChordName() const;
     juce::String getClickedChordName() const { return clickedChordName; }
     void setClickedChordName (const juce::String& name, int frames = 60) { clickedChordName = name; clickedChordFrames = frames; }
@@ -140,6 +147,10 @@ private:
     juce::ComboBox scalePickerCombo;
     juce::ComboBox followSourceCombo;
     juce::ComboBox melodyPickerCombo;
+    juce::TextButton exercisePlayButton { "Play" };
+
+    // Exercise preview playback state
+    bool exercisePreviewPlaying = false;
 
     bool practicing = false;
     juce::String practicingVoicingId;  // which voicing we're practicing
@@ -213,6 +224,12 @@ private:
     void loadNextChallenge();
     std::vector<int> computeTargetNotes (const Voicing& v, const PracticeChallenge& challenge);
     void updateScalePickerAvailability();
+
+    // Exercise preview (private helpers; playExercisePreview/stopExercisePreview are public)
+    void playExerciseInKey (int chromaticKey);
+    void buildExercisePreviewProgression();
+    std::vector<std::vector<int>> buildExerciseNoteSequence (int chromaticKey);
+    Progression buildExerciseProgression (int chromaticKey);
     void populateMelodyPicker();
     void updateFollowScaleVisibility();
     void updateTimedPractice (const std::vector<int>& activeNotes);
