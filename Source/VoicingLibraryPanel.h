@@ -3,6 +3,8 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "VoicingModel.h"
 #include "VoicingStatsChart.h"
+#include "MidiFileUtils.h"
+#include "LibraryExporter.h"
 
 // Forward declare
 class AudioPluginAudioProcessor;
@@ -22,8 +24,10 @@ public:
     // Called from editor's 60Hz timer with current active notes
     void updateRecording (const std::vector<int>& activeNotes);
 
-    // Get the currently selected voicing ID (empty if none)
+    // Get the currently selected voicing ID (empty if none or multi-select)
     juce::String getSelectedVoicingId() const;
+    std::vector<juce::String> getSelectedIds() const;
+    int getSelectionCount() const;
 
     // Refresh the stats chart for the currently selected voicing (call during practice)
     void refreshStatsChart();
@@ -40,18 +44,24 @@ public:
     void enterConfirmingWithVoicing (const Voicing& v);
     void selectVoicingById (const juce::String& id);
 
+    // Update the folder combo box items
+    void refreshFolderCombo();
+
 private:
     // ListBoxModel
     int getNumRows() override;
     void paintListBoxItem (int rowNumber, juce::Graphics& g, int width, int height,
                            bool rowIsSelected) override;
     void selectedRowsChanged (int lastRowClicked) override;
+    void listBoxItemClicked (int row, const juce::MouseEvent& e) override;
 
     AudioPluginAudioProcessor& processorRef;
 
     // --- Normal mode components ---
     juce::Label headerLabel;
     juce::Label recordingIndicator;
+    juce::TextButton moreButton { "..." };
+    juce::ComboBox folderCombo;
     juce::TextEditor searchEditor;
     juce::ComboBox qualityFilter;
     juce::ListBox voicingList;
@@ -97,5 +107,11 @@ private:
     void layoutNormalMode (juce::Rectangle<int> area);
     void layoutConfirmMode (juce::Rectangle<int> area);
 
+    std::unique_ptr<juce::FileChooser> fileChooser;
     void populateConfirmFields();
+    void showMoreMenu();
+    void showContextMenu (int rowIndex);
+    void moveSelectedToFolder (const juce::String& folderId);
+    juce::PopupMenu buildFolderSubmenu (int baseId);
+    void handleFolderSubmenuResult (int result, int baseId);
 };

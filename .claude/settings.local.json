@@ -8,7 +8,8 @@
       "mcp__context7__resolve-library-id",
       "WebSearch",
       "Bash(find /Users/charlo/dev/JUCE_PROJECTS/MidiApp -type f \\\\\\(-name *.plist -o -name *.icns -o -name Info* \\\\\\))",
-      "Bash(grep -r Chordy /Users/charlo/dev/JUCE_PROJECTS/MidiApp --include=*.cpp --include=*.h --include=*.txt -l)"
+      "Bash(grep -r Chordy /Users/charlo/dev/JUCE_PROJECTS/MidiApp --include=*.cpp --include=*.h --include=*.txt -l)",
+      "Bash(grep -l \"DragAndDropContainer\\\\|DragAndDropTarget\" /Users/charlo/dev/JUCE_PROJECTS/MidiApp/JUCE/modules/juce_gui_basics/native/*.h)"
     ]
   }
 }

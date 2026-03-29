@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ChordDetector.h"
+#include "FolderModel.h"
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_data_structures/juce_data_structures.h>
 #include <vector>
@@ -54,6 +55,7 @@ struct Progression
     int timeSignatureDen = 4;
     juce::MidiMessageSequence rawMidi; // original recording (beat-timestamped)
     double quantizeResolution = 0.0;  // 0=raw, 1.0=beat, 0.5=half, 0.25=quarter
+    juce::String folderId;            // folder UUID (empty = root/unfiled)
 
     bool isValid() const { return ! id.isEmpty() && ! chords.empty(); }
 };
@@ -72,12 +74,17 @@ public:
     // Transpose a progression's chords by a semitone offset, returning a new Progression
     static Progression transposeProgression (const Progression& p, int semitones);
 
+    // Folder management
+    FolderLibrary& getFolders() { return folders; }
+    const FolderLibrary& getFolders() const { return folders; }
+
     // Serialization
     juce::ValueTree toValueTree() const;
     void fromValueTree (const juce::ValueTree& tree);
 
 private:
     std::vector<Progression> progressions;
+    FolderLibrary folders;
 
     static juce::ValueTree chordToValueTree (const ProgressionChord& c);
     static ProgressionChord chordFromValueTree (const juce::ValueTree& tree);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ChordDetector.h"
+#include "FolderModel.h"
 #include <juce_data_structures/juce_data_structures.h>
 #include <vector>
 
@@ -14,6 +15,7 @@ struct Voicing
     std::vector<int> intervals;   // semitones from root, always starts with 0
     std::vector<int> velocities;  // per-note velocities (parallel to intervals)
     int octaveReference = 60;     // MIDI note of root when recorded
+    juce::String folderId;         // folder UUID (empty = root/unfiled)
 
     bool isValid() const { return ! intervals.empty() && ! id.isEmpty(); }
 
@@ -52,12 +54,17 @@ public:
     // Returns the matching voicing and the detected root note name, or nullptr if no match.
     const Voicing* findByNotes (const std::vector<int>& midiNotes, juce::String& outDisplayName) const;
 
+    // Folder management
+    FolderLibrary& getFolders() { return folders; }
+    const FolderLibrary& getFolders() const { return folders; }
+
     // Serialization
     juce::ValueTree toValueTree() const;
     void fromValueTree (const juce::ValueTree& tree);
 
 private:
     std::vector<Voicing> voicings;
+    FolderLibrary folders;
 
     static juce::ValueTree voicingToValueTree (const Voicing& v);
     static Voicing voicingFromValueTree (const juce::ValueTree& tree);

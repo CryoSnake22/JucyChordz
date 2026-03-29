@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ChordDetector.h"
+#include "FolderModel.h"
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_data_structures/juce_data_structures.h>
 #include <vector>
@@ -48,6 +49,7 @@ struct Melody
     int timeSignatureDen = 4;
     juce::MidiMessageSequence rawMidi;
     double quantizeResolution = 0.0;  // 0=raw, 1.0=beat, 0.5=half, 0.25=quarter
+    juce::String folderId;            // folder UUID (empty = root/unfiled)
 
     bool isValid() const { return ! id.isEmpty() && ! notes.empty(); }
 
@@ -86,6 +88,10 @@ public:
 
     static Melody transposeMelody (const Melody& m, int semitones);
 
+    // Folder management
+    FolderLibrary& getFolders() { return folders; }
+    const FolderLibrary& getFolders() const { return folders; }
+
     juce::ValueTree toValueTree() const;
     void fromValueTree (const juce::ValueTree& tree);
 
@@ -100,6 +106,7 @@ public:
 
 private:
     std::vector<Melody> melodies;
+    FolderLibrary folders;
 
     static juce::ValueTree noteToValueTree (const MelodyNote& n);
     static MelodyNote noteFromValueTree (const juce::ValueTree& tree);

@@ -113,6 +113,7 @@ static const juce::Identifier ID_noteStartBeats ("noteStartBeats");
 static const juce::Identifier ID_noteDurations ("noteDurations");
 static const juce::Identifier ID_rawMidi ("rawMidi");
 static const juce::Identifier ID_quantizeResolution ("quantizeResolution");
+static const juce::Identifier ID_folderId ("folderId");
 
 static juce::String intsToString (const std::vector<int>& v)
 {
@@ -272,6 +273,7 @@ juce::ValueTree ProgressionLibrary::progressionToValueTree (const Progression& p
     tree.setProperty (ID_timeSigDen, p.timeSignatureDen, nullptr);
     tree.setProperty (ID_rawMidi, midiSequenceToString (p.rawMidi), nullptr);
     tree.setProperty (ID_quantizeResolution, p.quantizeResolution, nullptr);
+    tree.setProperty (ID_folderId, p.folderId, nullptr);
 
     for (const auto& chord : p.chords)
         tree.appendChild (chordToValueTree (chord), nullptr);
@@ -292,6 +294,7 @@ Progression ProgressionLibrary::progressionFromValueTree (const juce::ValueTree&
     p.timeSignatureDen = tree.getProperty (ID_timeSigDen, 4);
     p.rawMidi = stringToMidiSequence (tree.getProperty (ID_rawMidi).toString());
     p.quantizeResolution = tree.getProperty (ID_quantizeResolution, 0.0);
+    p.folderId = tree.getProperty (ID_folderId, "").toString();
 
     for (int i = 0; i < tree.getNumChildren(); ++i)
     {
@@ -335,6 +338,7 @@ juce::ValueTree ProgressionLibrary::toValueTree() const
     juce::ValueTree tree (ID_ProgressionLibrary);
     for (const auto& p : progressions)
         tree.appendChild (progressionToValueTree (p), nullptr);
+    tree.appendChild (folders.toValueTree(), nullptr);
     return tree;
 }
 
@@ -347,4 +351,8 @@ void ProgressionLibrary::fromValueTree (const juce::ValueTree& tree)
         if (child.hasType (ID_Progression))
             progressions.push_back (progressionFromValueTree (child));
     }
+
+    auto foldersTree = tree.getChildWithName ("Folders");
+    if (foldersTree.isValid())
+        folders.fromValueTree (foldersTree);
 }

@@ -83,6 +83,13 @@ VoicingLibraryPanel::VoicingLibraryPanel (AudioPluginAudioProcessor& processor)
     recordingIndicator.setVisible (false);
     addAndMakeVisible (recordingIndicator);
 
+    moreButton.onClick = [this] { showMoreMenu(); };
+    addAndMakeVisible (moreButton);
+
+    folderCombo.onChange = [this] { updateDisplayedVoicings(); };
+    addAndMakeVisible (folderCombo);
+    refreshFolderCombo();
+
     qualityFilter.addItem ("All", 1);
     qualityFilter.addItem ("Major", 2);
     qualityFilter.addItem ("Minor", 3);
@@ -100,7 +107,7 @@ VoicingLibraryPanel::VoicingLibraryPanel (AudioPluginAudioProcessor& processor)
     addAndMakeVisible (searchEditor);
 
     voicingList.setModel (this);
-    // List colors inherited from LookAndFeel
+    voicingList.setMultipleSelectionEnabled (true);
     voicingList.setOutlineThickness (1);
     voicingList.setRowHeight (36);
     addAndMakeVisible (voicingList);
@@ -229,6 +236,8 @@ void VoicingLibraryPanel::paint (juce::Graphics& g)
 void VoicingLibraryPanel::setNormalModeVisible (bool visible)
 {
     headerLabel.setVisible (visible);
+    moreButton.setVisible (visible);
+    folderCombo.setVisible (visible);
     searchEditor.setVisible (visible);
     qualityFilter.setVisible (visible);
     voicingList.setVisible (visible);
@@ -267,8 +276,14 @@ void VoicingLibraryPanel::resized()
 void VoicingLibraryPanel::layoutNormalMode (juce::Rectangle<int> area)
 {
     auto headerRow = area.removeFromTop (24);
-    headerLabel.setBounds (headerRow.removeFromLeft (headerRow.getWidth() / 2));
-    recordingIndicator.setBounds (headerRow);
+    moreButton.setBounds (headerRow.removeFromRight (28));
+    headerRow.removeFromRight (4);
+    recordingIndicator.setBounds (headerRow.removeFromRight (headerRow.getWidth() / 2));
+    headerLabel.setBounds (headerRow);
+    area.removeFromTop (4);
+
+    auto folderRow = area.removeFromTop (24);
+    folderCombo.setBounds (folderRow);
     area.removeFromTop (4);
 
     auto searchRow = area.removeFromTop (24);
@@ -336,6 +351,7 @@ void VoicingLibraryPanel::layoutConfirmMode (juce::Rectangle<int> area)
 
 void VoicingLibraryPanel::refresh()
 {
+    refreshFolderCombo();
     updateDisplayedVoicings();
 }
 
@@ -385,10 +401,30 @@ void VoicingLibraryPanel::updateRecording (const std::vector<int>& activeNotes)
 
 juce::String VoicingLibraryPanel::getSelectedVoicingId() const
 {
+    if (voicingList.getNumSelectedRows() != 1)
+        return {};
     int row = voicingList.getSelectedRow();
     if (row >= 0 && row < static_cast<int> (displayedVoicings.size()))
         return displayedVoicings[static_cast<size_t> (row)].id;
     return {};
+}
+
+std::vector<juce::String> VoicingLibraryPanel::getSelectedIds() const
+{
+    std::vector<juce::String> ids;
+    auto rows = voicingList.getSelectedRows();
+    for (int i = 0; i < rows.size(); ++i)
+    {
+        int row = rows[i];
+        if (row >= 0 && row < static_cast<int> (displayedVoicings.size()))
+            ids.push_back (displayedVoicings[static_cast<size_t> (row)].id);
+    }
+    return ids;
+}
+
+int VoicingLibraryPanel::getSelectionCount() const
+{
+    return voicingList.getNumSelectedRows();
 }
 
 void VoicingLibraryPanel::refreshStatsChart()
@@ -413,6 +449,7 @@ void VoicingLibraryPanel::updateDisplayedVoicings()
 
     displayedVoicings.clear();
 
+    // Step 1: Start with all items
     if (filterId == 1)
     {
         displayedVoicings = all;
@@ -447,7 +484,35 @@ void VoicingLibraryPanel::updateDisplayedVoicings()
         }
     }
 
-    // Filter by search text
+    // Step 2: Filter by folder
+    int folderId = folderCombo.getSelectedId();
+    if (folderId == 2) // "Unfiled"
+    {
+        std::vector<Voicing> filtered;
+        for (const auto& v : displayedVoicings)
+            if (v.folderId.isEmpty())
+                filtered.push_back (v);
+        displayedVoicings = std::move (filtered);
+    }
+    else if (folderId >= 3) // Named folder
+    {
+        auto folderIdStr = folderCombo.getItemText (folderCombo.indexOfItemId (folderId));
+        // Map combo ID to folder UUID: IDs 3+ correspond to folders in order
+        const auto& folders = processorRef.voicingLibrary.getFolders().getAllFolders();
+        int folderIndex = folderId - 3;
+        if (folderIndex >= 0 && folderIndex < static_cast<int> (folders.size()))
+        {
+            auto targetFolderId = folders[static_cast<size_t> (folderIndex)].id;
+            std::vector<Voicing> filtered;
+            for (const auto& v : displayedVoicings)
+                if (v.folderId == targetFolderId)
+                    filtered.push_back (v);
+            displayedVoicings = std::move (filtered);
+        }
+    }
+    // folderId == 1 ("All Items") = no folder filter
+
+    // Step 3: Filter by search text
     auto searchText = searchEditor.getText().trim().toLowerCase();
     if (searchText.isNotEmpty())
     {
@@ -610,13 +675,13 @@ void VoicingLibraryPanel::cancelRecording()
 
 void VoicingLibraryPanel::onDelete()
 {
-    auto id = getSelectedVoicingId();
-    if (id.isNotEmpty())
-    {
+    auto ids = getSelectedIds();
+    if (ids.empty()) return;
+
+    for (const auto& id : ids)
         processorRef.voicingLibrary.removeVoicing (id);
-        processorRef.saveLibrariesToDisk();
-        updateDisplayedVoicings();
-    }
+    processorRef.saveLibrariesToDisk();
+    updateDisplayedVoicings();
 }
 
 // --- ListBoxModel ---
@@ -653,13 +718,386 @@ void VoicingLibraryPanel::paintListBoxItem (int rowNumber, juce::Graphics& g,
 
 void VoicingLibraryPanel::selectedRowsChanged (int /*lastRowClicked*/)
 {
-    auto selectedId = getSelectedVoicingId();
+    int count = getSelectionCount();
+    auto selectedId = getSelectedVoicingId(); // empty if count != 1
 
     if (selectedId.isNotEmpty())
         statsChart.setStats (processorRef.spacedRepetition.getStatsForVoicing (selectedId));
     else
         statsChart.clearStats();
 
+    // Single-item operations disabled during multi-select
+    playButton.setEnabled (count == 1);
+    editButton.setEnabled (count == 1);
+
     if (onSelectionChanged)
         onSelectionChanged (selectedId);
 }
+
+void VoicingLibraryPanel::listBoxItemClicked (int row, const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+        showContextMenu (row);
+}
+
+// --- Folder & Menu ---
+
+void VoicingLibraryPanel::refreshFolderCombo()
+{
+    int currentId = folderCombo.getSelectedId();
+    folderCombo.clear (juce::dontSendNotification);
+    folderCombo.addItem ("All Items", 1);
+    folderCombo.addItem ("Unfiled", 2);
+
+    const auto& folders = processorRef.voicingLibrary.getFolders().getAllFolders();
+    for (int i = 0; i < static_cast<int> (folders.size()); ++i)
+        folderCombo.addItem (folders[static_cast<size_t> (i)].name, i + 3);
+
+    if (currentId > 0 && folderCombo.indexOfItemId (currentId) >= 0)
+        folderCombo.setSelectedId (currentId, juce::dontSendNotification);
+    else
+        folderCombo.setSelectedId (1, juce::dontSendNotification);
+}
+
+void VoicingLibraryPanel::showMoreMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem (10, "Import MIDI...");
+    menu.addItem (11, "Export as MIDI...", getSelectionCount() == 1);
+    menu.addSeparator();
+    menu.addItem (20, "Import Library (.chordy)...");
+    menu.addItem (21, "Export Selected (.chordy)...", getSelectionCount() > 0);
+    menu.addItem (22, "Export All Voicings (.chordy)...");
+    menu.addSeparator();
+    menu.addItem (1, "New Folder...");
+
+    int folderId = folderCombo.getSelectedId();
+    bool viewingFolder = (folderId >= 3);
+    menu.addItem (2, "Rename Folder...", viewingFolder);
+    menu.addItem (3, "Delete Folder", viewingFolder);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&moreButton),
+        [this] (int result)
+        {
+            if (result == 10) // Import MIDI
+            {
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Import MIDI file...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory),
+                    "*.mid;*.midi");
+                auto flags = juce::FileBrowserComponent::openMode
+                           | juce::FileBrowserComponent::canSelectFiles;
+                fileChooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (! f.existsAsFile()) return;
+                    auto imported = MidiFileUtils::importMidiFile (f);
+                    if (! imported.success || imported.tracks.empty()) return;
+                    // Use first track with notes
+                    auto voicing = MidiFileUtils::midiToVoicing (imported.tracks[0]);
+                    voicing.name = f.getFileNameWithoutExtension();
+                    enterConfirmingWithVoicing (voicing);
+                });
+            }
+            else if (result == 11) // Export as MIDI
+            {
+                auto selectedId = getSelectedVoicingId();
+                if (selectedId.isEmpty()) return;
+                const auto* v = processorRef.voicingLibrary.getVoicing (selectedId);
+                if (v == nullptr) return;
+                auto defaultName = v->name.isNotEmpty() ? v->name : "voicing";
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Export as MIDI...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile (defaultName + ".mid"),
+                    "*.mid");
+                auto flags = juce::FileBrowserComponent::saveMode
+                           | juce::FileBrowserComponent::warnAboutOverwriting;
+                auto voicingCopy = *v;
+                fileChooser->launchAsync (flags, [voicingCopy] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (f == juce::File()) return;
+                    MidiFileUtils::exportVoicingToMidi (voicingCopy, f);
+                });
+            }
+            else if (result == 20) // Import Library (.chordy)
+            {
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Import Library...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory),
+                    "*.chordy");
+                auto flags = juce::FileBrowserComponent::openMode
+                           | juce::FileBrowserComponent::canSelectFiles;
+                fileChooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (! f.existsAsFile()) return;
+                    auto imported = LibraryExporter::parseCollection (f);
+                    if (! imported.success) return;
+                    auto merged = LibraryExporter::mergeIntoLibraries (
+                        imported,
+                        processorRef.voicingLibrary,
+                        processorRef.progressionLibrary,
+                        processorRef.melodyLibrary);
+                    processorRef.saveLibrariesToDisk();
+                    refreshFolderCombo();
+                    updateDisplayedVoicings();
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::InfoIcon,
+                        "Import Complete",
+                        "Added " + juce::String (merged.voicingsAdded) + " voicings, "
+                        + juce::String (merged.progressionsAdded) + " progressions, "
+                        + juce::String (merged.melodiesAdded) + " melodies.");
+                });
+            }
+            else if (result == 21) // Export Selected (.chordy)
+            {
+                auto ids = getSelectedIds();
+                if (ids.empty()) return;
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Export Selected...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile ("voicings.chordy"),
+                    "*.chordy");
+                auto flags = juce::FileBrowserComponent::saveMode
+                           | juce::FileBrowserComponent::warnAboutOverwriting;
+                fileChooser->launchAsync (flags, [this, ids] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (f == juce::File()) return;
+                    LibraryExporter::ExportOptions opts;
+                    opts.collectionName = f.getFileNameWithoutExtension();
+                    opts.voicingIds = ids;
+                    LibraryExporter::exportCollection (opts,
+                        processorRef.voicingLibrary,
+                        processorRef.progressionLibrary,
+                        processorRef.melodyLibrary, f);
+                });
+            }
+            else if (result == 22) // Export All Voicings (.chordy)
+            {
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Export All Voicings...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile ("all_voicings.chordy"),
+                    "*.chordy");
+                auto flags = juce::FileBrowserComponent::saveMode
+                           | juce::FileBrowserComponent::warnAboutOverwriting;
+                fileChooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (f == juce::File()) return;
+                    LibraryExporter::ExportOptions opts;
+                    opts.collectionName = f.getFileNameWithoutExtension();
+                    opts.includeProgressions = false;
+                    opts.includeMelodies = false;
+                    LibraryExporter::exportCollection (opts,
+                        processorRef.voicingLibrary,
+                        processorRef.progressionLibrary,
+                        processorRef.melodyLibrary, f);
+                });
+            }
+            else if (result == 1)
+            {
+                auto* aw = new juce::AlertWindow ("New Folder",
+                                                   "Enter folder name:",
+                                                   juce::MessageBoxIconType::NoIcon);
+                aw->addTextEditor ("name", "", "Name:");
+                aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [this, aw] (int r)
+                    {
+                        if (r == 1)
+                        {
+                            auto name = aw->getTextEditorContents ("name").trim();
+                            if (name.isNotEmpty())
+                            {
+                                Folder f;
+                                f.id = juce::Uuid().toString();
+                                f.name = name;
+                                f.sortOrder = processorRef.voicingLibrary.getFolders().size();
+                                processorRef.voicingLibrary.getFolders().addFolder (f);
+                                processorRef.saveLibrariesToDisk();
+                                refreshFolderCombo();
+                            }
+                        }
+                        delete aw;
+                    }), true);
+                if (auto* te = aw->getTextEditor ("name"))
+                    te->grabKeyboardFocus();
+            }
+            else if (result == 2)
+            {
+                int fi = folderCombo.getSelectedId() - 3;
+                const auto& folders = processorRef.voicingLibrary.getFolders().getAllFolders();
+                if (fi >= 0 && fi < static_cast<int> (folders.size()))
+                {
+                    auto currentName = folders[static_cast<size_t> (fi)].name;
+                    auto fId = folders[static_cast<size_t> (fi)].id;
+
+                    auto* aw = new juce::AlertWindow ("Rename Folder",
+                                                       "Enter new name:",
+                                                       juce::MessageBoxIconType::NoIcon);
+                    aw->addTextEditor ("name", currentName, "Name:");
+                    aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                        [this, aw, fId] (int r)
+                        {
+                            if (r == 1)
+                            {
+                                auto name = aw->getTextEditorContents ("name").trim();
+                                if (name.isNotEmpty())
+                                {
+                                    auto* folder = processorRef.voicingLibrary.getFolders().getFolder (fId);
+                                    if (folder != nullptr)
+                                    {
+                                        folder->name = name;
+                                        processorRef.saveLibrariesToDisk();
+                                        refreshFolderCombo();
+                                    }
+                                }
+                            }
+                            delete aw;
+                        }), true);
+                    if (auto* te = aw->getTextEditor ("name"))
+                        te->grabKeyboardFocus();
+                }
+            }
+            else if (result == 3)
+            {
+                int fi = folderCombo.getSelectedId() - 3;
+                const auto& folders = processorRef.voicingLibrary.getFolders().getAllFolders();
+                if (fi >= 0 && fi < static_cast<int> (folders.size()))
+                {
+                    auto fId = folders[static_cast<size_t> (fi)].id;
+                    // Move all items in this folder to root
+                    for (auto& v : const_cast<std::vector<Voicing>&> (processorRef.voicingLibrary.getAllVoicings()))
+                        if (v.folderId == fId)
+                            v.folderId = {};
+                    processorRef.voicingLibrary.getFolders().removeFolder (fId);
+                    processorRef.saveLibrariesToDisk();
+                    refreshFolderCombo();
+                    updateDisplayedVoicings();
+                }
+            }
+        });
+}
+
+juce::PopupMenu VoicingLibraryPanel::buildFolderSubmenu (int baseId)
+{
+    juce::PopupMenu sub;
+    sub.addItem (baseId, "New Folder...");
+    sub.addSeparator();
+    sub.addItem (baseId + 1, "Unfiled");
+    const auto& folders = processorRef.voicingLibrary.getFolders().getAllFolders();
+    for (int i = 0; i < static_cast<int> (folders.size()); ++i)
+        sub.addItem (baseId + 2 + i, folders[static_cast<size_t> (i)].name);
+    return sub;
+}
+
+void VoicingLibraryPanel::handleFolderSubmenuResult (int result, int baseId)
+{
+    if (result == baseId) // "New Folder..."
+    {
+        auto* aw = new juce::AlertWindow ("New Folder", "Enter folder name:",
+                                           juce::MessageBoxIconType::NoIcon);
+        aw->addTextEditor ("name", "", "Name:");
+        aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        aw->enterModalState (true, juce::ModalCallbackFunction::create (
+            [this, aw] (int r)
+            {
+                if (r == 1)
+                {
+                    auto name = aw->getTextEditorContents ("name").trim();
+                    if (name.isNotEmpty())
+                    {
+                        Folder f;
+                        f.id = juce::Uuid().toString();
+                        f.name = name;
+                        f.sortOrder = processorRef.voicingLibrary.getFolders().size();
+                        processorRef.voicingLibrary.getFolders().addFolder (f);
+                        processorRef.saveLibrariesToDisk();
+                        refreshFolderCombo();
+                        moveSelectedToFolder (f.id);
+                    }
+                }
+                delete aw;
+            }), true);
+        if (auto* te = aw->getTextEditor ("name"))
+            te->grabKeyboardFocus();
+    }
+    else if (result == baseId + 1) // "Unfiled"
+    {
+        moveSelectedToFolder ({});
+    }
+    else if (result >= baseId + 2)
+    {
+        const auto& folders = processorRef.voicingLibrary.getFolders().getAllFolders();
+        int fi = result - baseId - 2;
+        if (fi >= 0 && fi < static_cast<int> (folders.size()))
+            moveSelectedToFolder (folders[static_cast<size_t> (fi)].id);
+    }
+}
+
+void VoicingLibraryPanel::showContextMenu (int rowIndex)
+{
+    if (rowIndex < 0 || rowIndex >= static_cast<int> (displayedVoicings.size()))
+        return;
+
+    juce::PopupMenu menu;
+    menu.addSubMenu ("Move to Folder", buildFolderSubmenu (100));
+    menu.addItem (2, "Export as MIDI...");
+    menu.addSeparator();
+    menu.addItem (1, "Delete");
+
+    menu.showMenuAsync (juce::PopupMenu::Options(),
+        [this] (int result)
+        {
+            if (result == 1)
+                onDelete();
+            else if (result == 2)
+            {
+                // Trigger export via the more menu's export handler
+                auto selectedId = getSelectedVoicingId();
+                if (selectedId.isEmpty()) return;
+                const auto* v = processorRef.voicingLibrary.getVoicing (selectedId);
+                if (v == nullptr) return;
+                auto defaultName = v->name.isNotEmpty() ? v->name : "voicing";
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Export as MIDI...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile (defaultName + ".mid"),
+                    "*.mid");
+                auto flags = juce::FileBrowserComponent::saveMode
+                           | juce::FileBrowserComponent::warnAboutOverwriting;
+                auto voicingCopy = *v;
+                fileChooser->launchAsync (flags, [voicingCopy] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (f == juce::File()) return;
+                    MidiFileUtils::exportVoicingToMidi (voicingCopy, f);
+                });
+            }
+            else if (result >= 100)
+                handleFolderSubmenuResult (result, 100);
+        });
+}
+
+void VoicingLibraryPanel::moveSelectedToFolder (const juce::String& targetFolderId)
+{
+    auto ids = getSelectedIds();
+    if (ids.empty()) return;
+
+    for (auto& v : const_cast<std::vector<Voicing>&> (processorRef.voicingLibrary.getAllVoicings()))
+        for (const auto& id : ids)
+            if (v.id == id)
+                v.folderId = targetFolderId;
+
+    processorRef.saveLibrariesToDisk();
+    updateDisplayedVoicings();
+}
+

@@ -120,6 +120,7 @@ static const juce::Identifier ID_rootPitchClass ("rootPitchClass");
 static const juce::Identifier ID_intervals ("intervals");
 static const juce::Identifier ID_velocities ("velocities");
 static const juce::Identifier ID_octaveRef ("octaveRef");
+static const juce::Identifier ID_folderId ("folderId");
 
 static juce::String intervalsToString (const std::vector<int>& intervals)
 {
@@ -153,6 +154,7 @@ juce::ValueTree VoicingLibrary::voicingToValueTree (const Voicing& v)
     tree.setProperty (ID_intervals, intervalsToString (v.intervals), nullptr);
     tree.setProperty (ID_velocities, intervalsToString (v.velocities), nullptr);
     tree.setProperty (ID_octaveRef, v.octaveReference, nullptr);
+    tree.setProperty (ID_folderId, v.folderId, nullptr);
     return tree;
 }
 
@@ -167,6 +169,7 @@ Voicing VoicingLibrary::voicingFromValueTree (const juce::ValueTree& tree)
     v.intervals = stringToIntervals (tree.getProperty (ID_intervals).toString());
     v.velocities = stringToIntervals (tree.getProperty (ID_velocities).toString());
     v.octaveReference = tree.getProperty (ID_octaveRef, 60);
+    v.folderId = tree.getProperty (ID_folderId, "").toString();
     return v;
 }
 
@@ -175,6 +178,7 @@ juce::ValueTree VoicingLibrary::toValueTree() const
     juce::ValueTree tree (ID_VoicingLibrary);
     for (const auto& v : voicings)
         tree.appendChild (voicingToValueTree (v), nullptr);
+    tree.appendChild (folders.toValueTree(), nullptr);
     return tree;
 }
 
@@ -187,4 +191,8 @@ void VoicingLibrary::fromValueTree (const juce::ValueTree& tree)
         if (child.hasType (ID_Voicing))
             voicings.push_back (voicingFromValueTree (child));
     }
+
+    auto foldersTree = tree.getChildWithName ("Folders");
+    if (foldersTree.isValid())
+        folders.fromValueTree (foldersTree);
 }

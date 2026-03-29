@@ -168,6 +168,7 @@ static const juce::Identifier ID_durationBeats ("durationBeats");
 static const juce::Identifier ID_velocity ("velocity");
 static const juce::Identifier ID_quality ("quality");
 static const juce::Identifier ID_alterations ("alterations");
+static const juce::Identifier ID_folderId ("folderId");
 
 // Serialize MidiMessageSequence to compact string (same format as ProgressionModel)
 static juce::String midiSequenceToString (const juce::MidiMessageSequence& seq)
@@ -269,6 +270,7 @@ juce::ValueTree MelodyLibrary::melodyToValueTree (const Melody& m)
     tree.setProperty (ID_timeSigDen, m.timeSignatureDen, nullptr);
     tree.setProperty (ID_rawMidi, midiSequenceToString (m.rawMidi), nullptr);
     tree.setProperty (ID_quantizeResolution, m.quantizeResolution, nullptr);
+    tree.setProperty (ID_folderId, m.folderId, nullptr);
 
     for (const auto& cc : m.chordContexts)
         tree.appendChild (chordContextToValueTree (cc), nullptr);
@@ -291,6 +293,7 @@ Melody MelodyLibrary::melodyFromValueTree (const juce::ValueTree& tree)
     m.timeSignatureDen = tree.getProperty (ID_timeSigDen, 4);
     m.rawMidi = stringToMidiSequence (tree.getProperty (ID_rawMidi).toString());
     m.quantizeResolution = tree.getProperty (ID_quantizeResolution, 0.0);
+    m.folderId = tree.getProperty (ID_folderId, "").toString();
 
     for (int i = 0; i < tree.getNumChildren(); ++i)
     {
@@ -309,6 +312,7 @@ juce::ValueTree MelodyLibrary::toValueTree() const
     juce::ValueTree tree (ID_MelodyLibrary);
     for (const auto& m : melodies)
         tree.appendChild (melodyToValueTree (m), nullptr);
+    tree.appendChild (folders.toValueTree(), nullptr);
     return tree;
 }
 
@@ -321,4 +325,8 @@ void MelodyLibrary::fromValueTree (const juce::ValueTree& tree)
         if (child.hasType (ID_Melody))
             melodies.push_back (melodyFromValueTree (child));
     }
+
+    auto foldersTree = tree.getChildWithName ("Folders");
+    if (foldersTree.isValid())
+        folders.fromValueTree (foldersTree);
 }

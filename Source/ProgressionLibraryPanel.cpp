@@ -84,7 +84,15 @@ ProgressionLibraryPanel::ProgressionLibraryPanel (AudioPluginAudioProcessor& pro
     recordingIndicator.setVisible (false);
     addAndMakeVisible (recordingIndicator);
 
+    moreButton.onClick = [this] { showMoreMenu(); };
+    addAndMakeVisible (moreButton);
+
+    folderCombo.onChange = [this] { updateDisplayedProgressions(); };
+    addAndMakeVisible (folderCombo);
+    refreshFolderCombo();
+
     progressionList.setModel (this);
+    progressionList.setMultipleSelectionEnabled (true);
     progressionList.setOutlineThickness (1);
     progressionList.setRowHeight (36);
     addAndMakeVisible (progressionList);
@@ -327,8 +335,14 @@ void ProgressionLibraryPanel::resized()
 void ProgressionLibraryPanel::layoutIdleMode (juce::Rectangle<int> area)
 {
     auto headerRow = area.removeFromTop (24);
-    headerLabel.setBounds (headerRow.removeFromLeft (headerRow.getWidth() / 2));
-    recordingIndicator.setBounds (headerRow);
+    moreButton.setBounds (headerRow.removeFromRight (28));
+    headerRow.removeFromRight (4);
+    recordingIndicator.setBounds (headerRow.removeFromRight (headerRow.getWidth() / 2));
+    headerLabel.setBounds (headerRow);
+    area.removeFromTop (4);
+
+    auto folderRow = area.removeFromTop (24);
+    folderCombo.setBounds (folderRow);
     area.removeFromTop (4);
 
     auto bottomRow = area.removeFromBottom (30);
@@ -458,6 +472,8 @@ void ProgressionLibraryPanel::layoutConfirmMode (juce::Rectangle<int> area)
 void ProgressionLibraryPanel::setIdleModeVisible (bool v)
 {
     headerLabel.setVisible (v);
+    moreButton.setVisible (v);
+    folderCombo.setVisible (v);
     searchEditor.setVisible (v);
     progressionList.setVisible (v);
     statsChart.setVisible (v);
@@ -921,14 +937,14 @@ void ProgressionLibraryPanel::onConfirmSave()
 
 void ProgressionLibraryPanel::onDelete()
 {
-    auto id = getSelectedProgressionId();
-    if (id.isNotEmpty())
-    {
+    auto ids = getSelectedIds();
+    if (ids.empty()) return;
+
+    for (const auto& id : ids)
         processorRef.progressionLibrary.removeProgression (id);
-        processorRef.saveLibrariesToDisk();
-        updateDisplayedProgressions();
-        repaint();
-    }
+    processorRef.saveLibrariesToDisk();
+    updateDisplayedProgressions();
+    repaint();
 }
 
 void ProgressionLibraryPanel::onEditExisting()
@@ -1010,27 +1026,82 @@ void ProgressionLibraryPanel::onEditPlayToggle()
 
 void ProgressionLibraryPanel::refresh()
 {
+    refreshFolderCombo();
     updateDisplayedProgressions();
 }
 
 juce::String ProgressionLibraryPanel::getSelectedProgressionId() const
 {
+    if (progressionList.getNumSelectedRows() != 1)
+        return {};
     int row = progressionList.getSelectedRow();
     if (row >= 0 && row < static_cast<int> (displayedProgressions.size()))
         return displayedProgressions[static_cast<size_t> (row)].id;
     return {};
 }
 
+std::vector<juce::String> ProgressionLibraryPanel::getSelectedIds() const
+{
+    std::vector<juce::String> ids;
+    auto rows = progressionList.getSelectedRows();
+    for (int i = 0; i < rows.size(); ++i)
+    {
+        int row = rows[i];
+        if (row >= 0 && row < static_cast<int> (displayedProgressions.size()))
+            ids.push_back (displayedProgressions[static_cast<size_t> (row)].id);
+    }
+    return ids;
+}
+
+int ProgressionLibraryPanel::getSelectionCount() const
+{
+    return progressionList.getNumSelectedRows();
+}
+
 void ProgressionLibraryPanel::updateDisplayedProgressions()
 {
-    auto searchText = searchEditor.getText().trim().toLowerCase();
     const auto& all = processorRef.progressionLibrary.getAllProgressions();
     displayedProgressions.clear();
-    for (const auto& p : all)
+
+    // Step 1: All items
+    displayedProgressions.assign (all.begin(), all.end());
+
+    // Step 2: Filter by folder
+    int folderId = folderCombo.getSelectedId();
+    if (folderId == 2) // "Unfiled"
     {
-        if (searchText.isEmpty() || p.name.toLowerCase().contains (searchText))
-            displayedProgressions.push_back (p);
+        std::vector<Progression> filtered;
+        for (const auto& p : displayedProgressions)
+            if (p.folderId.isEmpty())
+                filtered.push_back (p);
+        displayedProgressions = std::move (filtered);
     }
+    else if (folderId >= 3) // Named folder
+    {
+        const auto& folders = processorRef.progressionLibrary.getFolders().getAllFolders();
+        int folderIndex = folderId - 3;
+        if (folderIndex >= 0 && folderIndex < static_cast<int> (folders.size()))
+        {
+            auto targetFolderId = folders[static_cast<size_t> (folderIndex)].id;
+            std::vector<Progression> filtered;
+            for (const auto& p : displayedProgressions)
+                if (p.folderId == targetFolderId)
+                    filtered.push_back (p);
+            displayedProgressions = std::move (filtered);
+        }
+    }
+
+    // Step 3: Filter by search text
+    auto searchText = searchEditor.getText().trim().toLowerCase();
+    if (searchText.isNotEmpty())
+    {
+        std::vector<Progression> filtered;
+        for (const auto& p : displayedProgressions)
+            if (p.name.toLowerCase().contains (searchText))
+                filtered.push_back (p);
+        displayedProgressions = std::move (filtered);
+    }
+
     progressionList.updateContent();
     progressionList.repaint();
 }
@@ -1080,9 +1151,377 @@ void ProgressionLibraryPanel::refreshStatsChart()
 
 void ProgressionLibraryPanel::selectedRowsChanged (int)
 {
+    int count = getSelectionCount();
     auto id = getSelectedProgressionId();
     refreshStatsChart();
+
+    playButton.setEnabled (count == 1);
+    editButton.setEnabled (count == 1);
 
     if (onSelectionChanged)
         onSelectionChanged (id);
 }
+
+void ProgressionLibraryPanel::listBoxItemClicked (int row, const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+        showContextMenu (row);
+}
+
+// --- Folder & Menu ---
+
+void ProgressionLibraryPanel::refreshFolderCombo()
+{
+    int currentId = folderCombo.getSelectedId();
+    folderCombo.clear (juce::dontSendNotification);
+    folderCombo.addItem ("All Items", 1);
+    folderCombo.addItem ("Unfiled", 2);
+
+    const auto& folders = processorRef.progressionLibrary.getFolders().getAllFolders();
+    for (int i = 0; i < static_cast<int> (folders.size()); ++i)
+        folderCombo.addItem (folders[static_cast<size_t> (i)].name, i + 3);
+
+    if (currentId > 0 && folderCombo.indexOfItemId (currentId) >= 0)
+        folderCombo.setSelectedId (currentId, juce::dontSendNotification);
+    else
+        folderCombo.setSelectedId (1, juce::dontSendNotification);
+}
+
+void ProgressionLibraryPanel::showMoreMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem (10, "Import MIDI...");
+    menu.addItem (11, "Export as MIDI...", getSelectionCount() == 1);
+    menu.addSeparator();
+    menu.addItem (20, "Import Library (.chordy)...");
+    menu.addItem (21, "Export Selected (.chordy)...", getSelectionCount() > 0);
+    menu.addItem (22, "Export All Progressions (.chordy)...");
+    menu.addSeparator();
+    menu.addItem (1, "New Folder...");
+
+    int folderId = folderCombo.getSelectedId();
+    bool viewingFolder = (folderId >= 3);
+    menu.addItem (2, "Rename Folder...", viewingFolder);
+    menu.addItem (3, "Delete Folder", viewingFolder);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&moreButton),
+        [this] (int result)
+        {
+            if (result == 10) // Import MIDI
+            {
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Import MIDI file...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory),
+                    "*.mid;*.midi");
+                auto flags = juce::FileBrowserComponent::openMode
+                           | juce::FileBrowserComponent::canSelectFiles;
+                fileChooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (! f.existsAsFile()) return;
+                    auto imported = MidiFileUtils::importMidiFile (f);
+                    if (! imported.success || imported.tracks.empty()) return;
+                    pendingProgression = MidiFileUtils::midiToProgression (
+                        imported.tracks[0], imported.bpm, imported.timeSigNum, imported.timeSigDen);
+                    pendingProgression.name = f.getFileNameWithoutExtension();
+                    enterEditing();
+                });
+            }
+            else if (result == 11) // Export as MIDI
+            {
+                auto selectedId = getSelectedProgressionId();
+                if (selectedId.isEmpty()) return;
+                const auto* p = processorRef.progressionLibrary.getProgression (selectedId);
+                if (p == nullptr) return;
+                auto defaultName = p->name.isNotEmpty() ? p->name : "progression";
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Export as MIDI...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile (defaultName + ".mid"),
+                    "*.mid");
+                auto flags = juce::FileBrowserComponent::saveMode
+                           | juce::FileBrowserComponent::warnAboutOverwriting;
+                auto progCopy = *p;
+                fileChooser->launchAsync (flags, [progCopy] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (f == juce::File()) return;
+                    MidiFileUtils::exportProgressionToMidi (progCopy, f);
+                });
+            }
+            else if (result == 20) // Import Library
+            {
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Import Library...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory),
+                    "*.chordy");
+                auto flags = juce::FileBrowserComponent::openMode
+                           | juce::FileBrowserComponent::canSelectFiles;
+                fileChooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (! f.existsAsFile()) return;
+                    auto imported = LibraryExporter::parseCollection (f);
+                    if (! imported.success) return;
+                    auto merged = LibraryExporter::mergeIntoLibraries (
+                        imported, processorRef.voicingLibrary,
+                        processorRef.progressionLibrary, processorRef.melodyLibrary);
+                    processorRef.saveLibrariesToDisk();
+                    refreshFolderCombo();
+                    updateDisplayedProgressions();
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::InfoIcon, "Import Complete",
+                        "Added " + juce::String (merged.voicingsAdded) + " voicings, "
+                        + juce::String (merged.progressionsAdded) + " progressions, "
+                        + juce::String (merged.melodiesAdded) + " melodies.");
+                });
+            }
+            else if (result == 21) // Export Selected
+            {
+                auto ids = getSelectedIds();
+                if (ids.empty()) return;
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Export Selected...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile ("progressions.chordy"),
+                    "*.chordy");
+                auto flags = juce::FileBrowserComponent::saveMode
+                           | juce::FileBrowserComponent::warnAboutOverwriting;
+                fileChooser->launchAsync (flags, [this, ids] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (f == juce::File()) return;
+                    LibraryExporter::ExportOptions opts;
+                    opts.collectionName = f.getFileNameWithoutExtension();
+                    opts.progressionIds = ids;
+                    opts.includeVoicings = false;
+                    opts.includeMelodies = false;
+                    LibraryExporter::exportCollection (opts,
+                        processorRef.voicingLibrary, processorRef.progressionLibrary,
+                        processorRef.melodyLibrary, f);
+                });
+            }
+            else if (result == 22) // Export All Progressions
+            {
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Export All Progressions...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile ("all_progressions.chordy"),
+                    "*.chordy");
+                auto flags = juce::FileBrowserComponent::saveMode
+                           | juce::FileBrowserComponent::warnAboutOverwriting;
+                fileChooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (f == juce::File()) return;
+                    LibraryExporter::ExportOptions opts;
+                    opts.collectionName = f.getFileNameWithoutExtension();
+                    opts.includeVoicings = false;
+                    opts.includeMelodies = false;
+                    LibraryExporter::exportCollection (opts,
+                        processorRef.voicingLibrary, processorRef.progressionLibrary,
+                        processorRef.melodyLibrary, f);
+                });
+            }
+            else if (result == 1)
+            {
+                auto* aw = new juce::AlertWindow ("New Folder", "Enter folder name:",
+                                                   juce::MessageBoxIconType::NoIcon);
+                aw->addTextEditor ("name", "", "Name:");
+                aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [this, aw] (int r)
+                    {
+                        if (r == 1)
+                        {
+                            auto name = aw->getTextEditorContents ("name").trim();
+                            if (name.isNotEmpty())
+                            {
+                                Folder f;
+                                f.id = juce::Uuid().toString();
+                                f.name = name;
+                                f.sortOrder = processorRef.progressionLibrary.getFolders().size();
+                                processorRef.progressionLibrary.getFolders().addFolder (f);
+                                processorRef.saveLibrariesToDisk();
+                                refreshFolderCombo();
+                            }
+                        }
+                        delete aw;
+                    }), true);
+                if (auto* te = aw->getTextEditor ("name"))
+                    te->grabKeyboardFocus();
+            }
+            else if (result == 2)
+            {
+                int fi = folderCombo.getSelectedId() - 3;
+                const auto& folders = processorRef.progressionLibrary.getFolders().getAllFolders();
+                if (fi >= 0 && fi < static_cast<int> (folders.size()))
+                {
+                    auto currentName = folders[static_cast<size_t> (fi)].name;
+                    auto fId = folders[static_cast<size_t> (fi)].id;
+                    auto* aw = new juce::AlertWindow ("Rename Folder", "Enter new name:",
+                                                       juce::MessageBoxIconType::NoIcon);
+                    aw->addTextEditor ("name", currentName, "Name:");
+                    aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                        [this, aw, fId] (int r)
+                        {
+                            if (r == 1)
+                            {
+                                auto name = aw->getTextEditorContents ("name").trim();
+                                if (name.isNotEmpty())
+                                {
+                                    auto* folder = processorRef.progressionLibrary.getFolders().getFolder (fId);
+                                    if (folder != nullptr)
+                                    {
+                                        folder->name = name;
+                                        processorRef.saveLibrariesToDisk();
+                                        refreshFolderCombo();
+                                    }
+                                }
+                            }
+                            delete aw;
+                        }), true);
+                    if (auto* te = aw->getTextEditor ("name"))
+                        te->grabKeyboardFocus();
+                }
+            }
+            else if (result == 3)
+            {
+                int fi = folderCombo.getSelectedId() - 3;
+                const auto& folders = processorRef.progressionLibrary.getFolders().getAllFolders();
+                if (fi >= 0 && fi < static_cast<int> (folders.size()))
+                {
+                    auto fId = folders[static_cast<size_t> (fi)].id;
+                    for (auto& p : const_cast<std::vector<Progression>&> (processorRef.progressionLibrary.getAllProgressions()))
+                        if (p.folderId == fId)
+                            p.folderId = {};
+                    processorRef.progressionLibrary.getFolders().removeFolder (fId);
+                    processorRef.saveLibrariesToDisk();
+                    refreshFolderCombo();
+                    updateDisplayedProgressions();
+                }
+            }
+        });
+}
+
+juce::PopupMenu ProgressionLibraryPanel::buildFolderSubmenu (int baseId)
+{
+    juce::PopupMenu sub;
+    sub.addItem (baseId, "New Folder...");
+    sub.addSeparator();
+    sub.addItem (baseId + 1, "Unfiled");
+    const auto& folders = processorRef.progressionLibrary.getFolders().getAllFolders();
+    for (int i = 0; i < static_cast<int> (folders.size()); ++i)
+        sub.addItem (baseId + 2 + i, folders[static_cast<size_t> (i)].name);
+    return sub;
+}
+
+void ProgressionLibraryPanel::handleFolderSubmenuResult (int result, int baseId)
+{
+    if (result == baseId)
+    {
+        auto* aw = new juce::AlertWindow ("New Folder", "Enter folder name:",
+                                           juce::MessageBoxIconType::NoIcon);
+        aw->addTextEditor ("name", "", "Name:");
+        aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        aw->enterModalState (true, juce::ModalCallbackFunction::create (
+            [this, aw] (int r)
+            {
+                if (r == 1)
+                {
+                    auto name = aw->getTextEditorContents ("name").trim();
+                    if (name.isNotEmpty())
+                    {
+                        Folder f;
+                        f.id = juce::Uuid().toString();
+                        f.name = name;
+                        f.sortOrder = processorRef.progressionLibrary.getFolders().size();
+                        processorRef.progressionLibrary.getFolders().addFolder (f);
+                        processorRef.saveLibrariesToDisk();
+                        refreshFolderCombo();
+                        moveSelectedToFolder (f.id);
+                    }
+                }
+                delete aw;
+            }), true);
+        if (auto* te = aw->getTextEditor ("name"))
+            te->grabKeyboardFocus();
+    }
+    else if (result == baseId + 1)
+    {
+        moveSelectedToFolder ({});
+    }
+    else if (result >= baseId + 2)
+    {
+        const auto& folders = processorRef.progressionLibrary.getFolders().getAllFolders();
+        int fi = result - baseId - 2;
+        if (fi >= 0 && fi < static_cast<int> (folders.size()))
+            moveSelectedToFolder (folders[static_cast<size_t> (fi)].id);
+    }
+}
+
+void ProgressionLibraryPanel::showContextMenu (int rowIndex)
+{
+    if (rowIndex < 0 || rowIndex >= static_cast<int> (displayedProgressions.size()))
+        return;
+
+    juce::PopupMenu menu;
+    menu.addSubMenu ("Move to Folder", buildFolderSubmenu (100));
+    menu.addItem (2, "Export as MIDI...");
+    menu.addSeparator();
+    menu.addItem (1, "Delete");
+
+    menu.showMenuAsync (juce::PopupMenu::Options(),
+        [this] (int result)
+        {
+            if (result == 1)
+            {
+                onDelete();
+            }
+            else if (result == 2)
+            {
+                auto selectedId = getSelectedProgressionId();
+                if (selectedId.isEmpty()) return;
+                const auto* p = processorRef.progressionLibrary.getProgression (selectedId);
+                if (p == nullptr) return;
+                auto defaultName = p->name.isNotEmpty() ? p->name : "progression";
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Export as MIDI...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile (defaultName + ".mid"),
+                    "*.mid");
+                auto flags = juce::FileBrowserComponent::saveMode
+                           | juce::FileBrowserComponent::warnAboutOverwriting;
+                auto progCopy = *p;
+                fileChooser->launchAsync (flags, [progCopy] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (f == juce::File()) return;
+                    MidiFileUtils::exportProgressionToMidi (progCopy, f);
+                });
+            }
+            else if (result >= 100)
+            {
+                handleFolderSubmenuResult (result, 100);
+            }
+        });
+}
+
+void ProgressionLibraryPanel::moveSelectedToFolder (const juce::String& targetFolderId)
+{
+    auto ids = getSelectedIds();
+    if (ids.empty()) return;
+
+    for (auto& p : const_cast<std::vector<Progression>&> (processorRef.progressionLibrary.getAllProgressions()))
+        for (const auto& id : ids)
+            if (p.id == id)
+                p.folderId = targetFolderId;
+
+    processorRef.saveLibrariesToDisk();
+    updateDisplayedProgressions();
+}
+

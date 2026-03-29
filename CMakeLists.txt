@@ -17,11 +17,14 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(SOURCE_FILES Source/BeatIndicatorComponent.cpp Source/BeatIndicatorComponent.h
                  Source/ChordDetector.cpp Source/ChordDetector.h
+                 Source/FolderModel.cpp Source/FolderModel.h
                  Source/ChordySynth.cpp Source/ChordySynth.h
                  Source/ExternalInstrument.cpp Source/ExternalInstrument.h
+                 Source/LibraryExporter.cpp Source/LibraryExporter.h
                  Source/MelodyChartComponent.cpp Source/MelodyChartComponent.h
                  Source/MelodyLibraryPanel.cpp Source/MelodyLibraryPanel.h
                  Source/MelodyModel.cpp Source/MelodyModel.h
+                 Source/MidiFileUtils.cpp Source/MidiFileUtils.h
                  Source/ProgressionModel.cpp Source/ProgressionModel.h
                  Source/ProgressionRecorder.cpp Source/ProgressionRecorder.h
                  Source/ProgressionChartComponent.cpp Source/ProgressionChartComponent.h

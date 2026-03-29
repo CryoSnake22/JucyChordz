@@ -2,6 +2,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "MelodyModel.h"
+#include "MidiFileUtils.h"
+#include "LibraryExporter.h"
 #include "MelodyChartComponent.h"
 #include "VoicingStatsChart.h"
 
@@ -22,6 +24,8 @@ public:
     void updateTimerCallback();
 
     juce::String getSelectedMelodyId() const;
+    std::vector<juce::String> getSelectedIds() const;
+    int getSelectionCount() const;
     void refreshStatsChart();
 
     std::function<void (const juce::String& melodyId)> onSelectionChanged;
@@ -33,11 +37,14 @@ public:
     std::function<void (const std::vector<int>& midiNotes)> onNotePreview;
     std::function<void (const Melody& transposed)> onTransposedPreview;
 
+    void refreshFolderCombo();
+
 private:
     int getNumRows() override;
     void paintListBoxItem (int rowNumber, juce::Graphics& g, int width, int height,
                            bool rowIsSelected) override;
     void selectedRowsChanged (int lastRowClicked) override;
+    void listBoxItemClicked (int row, const juce::MouseEvent& e) override;
 
     AudioPluginAudioProcessor& processorRef;
 
@@ -47,6 +54,8 @@ private:
     // --- Idle mode ---
     juce::Label headerLabel;
     juce::Label recordingIndicator;
+    juce::TextButton moreButton { "..." };
+    juce::ComboBox folderCombo;
     juce::TextEditor searchEditor;
     juce::ListBox melodyList;
     MelodyChartComponent chartPreview;
@@ -131,9 +140,16 @@ private:
     void onChordContextSelected (int index);
     void updateChordContextFromCombos();
 
+    std::unique_ptr<juce::FileChooser> fileChooser;
     void setIdleModeVisible (bool v);
     void setEditModeVisible (bool v);
     void setConfirmModeVisible (bool v);
+
+    void showMoreMenu();
+    void showContextMenu (int rowIndex);
+    void moveSelectedToFolder (const juce::String& folderId);
+    juce::PopupMenu buildFolderSubmenu (int baseId);
+    void handleFolderSubmenuResult (int result, int baseId);
 
     void layoutIdleMode (juce::Rectangle<int> area);
     void layoutEditMode (juce::Rectangle<int> area);

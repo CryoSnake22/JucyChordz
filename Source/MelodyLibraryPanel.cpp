@@ -99,7 +99,15 @@ MelodyLibraryPanel::MelodyLibraryPanel (AudioPluginAudioProcessor& processor)
     recordingIndicator.setVisible (false);
     addAndMakeVisible (recordingIndicator);
 
+    moreButton.onClick = [this] { showMoreMenu(); };
+    addAndMakeVisible (moreButton);
+
+    folderCombo.onChange = [this] { updateDisplayedMelodies(); };
+    addAndMakeVisible (folderCombo);
+    refreshFolderCombo();
+
     melodyList.setModel (this);
+    melodyList.setMultipleSelectionEnabled (true);
     melodyList.setOutlineThickness (1);
     melodyList.setRowHeight (36);
     addAndMakeVisible (melodyList);
@@ -300,8 +308,14 @@ void MelodyLibraryPanel::resized()
 void MelodyLibraryPanel::layoutIdleMode (juce::Rectangle<int> area)
 {
     auto headerRow = area.removeFromTop (24);
-    headerLabel.setBounds (headerRow.removeFromLeft (headerRow.getWidth() / 2));
-    recordingIndicator.setBounds (headerRow);
+    moreButton.setBounds (headerRow.removeFromRight (28));
+    headerRow.removeFromRight (4);
+    recordingIndicator.setBounds (headerRow.removeFromRight (headerRow.getWidth() / 2));
+    headerLabel.setBounds (headerRow);
+    area.removeFromTop (4);
+
+    auto folderRow = area.removeFromTop (24);
+    folderCombo.setBounds (folderRow);
     area.removeFromTop (4);
 
     auto bottomRow = area.removeFromBottom (30);
@@ -421,6 +435,8 @@ void MelodyLibraryPanel::layoutConfirmMode (juce::Rectangle<int> area)
 void MelodyLibraryPanel::setIdleModeVisible (bool v)
 {
     headerLabel.setVisible (v);
+    moreButton.setVisible (v);
+    folderCombo.setVisible (v);
     searchEditor.setVisible (v);
     melodyList.setVisible (v);
     statsChart.setVisible (v);
@@ -893,14 +909,14 @@ void MelodyLibraryPanel::onConfirmSave()
 
 void MelodyLibraryPanel::onDelete()
 {
-    auto id = getSelectedMelodyId();
-    if (id.isNotEmpty())
-    {
+    auto ids = getSelectedIds();
+    if (ids.empty()) return;
+
+    for (const auto& id : ids)
         processorRef.melodyLibrary.removeMelody (id);
-        processorRef.saveLibrariesToDisk();
-        updateDisplayedMelodies();
-        repaint();
-    }
+    processorRef.saveLibrariesToDisk();
+    updateDisplayedMelodies();
+    repaint();
 }
 
 void MelodyLibraryPanel::onEditExisting()
@@ -971,29 +987,84 @@ void MelodyLibraryPanel::onEditPlayToggle()
 
 void MelodyLibraryPanel::refresh()
 {
+    refreshFolderCombo();
     updateDisplayedMelodies();
 }
 
 void MelodyLibraryPanel::updateDisplayedMelodies()
 {
-    auto searchText = searchEditor.getText().trim().toLowerCase();
     const auto& all = processorRef.melodyLibrary.getAllMelodies();
     displayedMelodies.clear();
-    for (const auto& m : all)
+
+    // Step 1: All items
+    displayedMelodies.assign (all.begin(), all.end());
+
+    // Step 2: Filter by folder
+    int folderId = folderCombo.getSelectedId();
+    if (folderId == 2) // "Unfiled"
     {
-        if (searchText.isEmpty() || m.name.toLowerCase().contains (searchText))
-            displayedMelodies.push_back (m);
+        std::vector<Melody> filtered;
+        for (const auto& m : displayedMelodies)
+            if (m.folderId.isEmpty())
+                filtered.push_back (m);
+        displayedMelodies = std::move (filtered);
     }
+    else if (folderId >= 3) // Named folder
+    {
+        const auto& folders = processorRef.melodyLibrary.getFolders().getAllFolders();
+        int folderIndex = folderId - 3;
+        if (folderIndex >= 0 && folderIndex < static_cast<int> (folders.size()))
+        {
+            auto targetFolderId = folders[static_cast<size_t> (folderIndex)].id;
+            std::vector<Melody> filtered;
+            for (const auto& m : displayedMelodies)
+                if (m.folderId == targetFolderId)
+                    filtered.push_back (m);
+            displayedMelodies = std::move (filtered);
+        }
+    }
+
+    // Step 3: Filter by search text
+    auto searchText = searchEditor.getText().trim().toLowerCase();
+    if (searchText.isNotEmpty())
+    {
+        std::vector<Melody> filtered;
+        for (const auto& m : displayedMelodies)
+            if (m.name.toLowerCase().contains (searchText))
+                filtered.push_back (m);
+        displayedMelodies = std::move (filtered);
+    }
+
     melodyList.updateContent();
     melodyList.repaint();
 }
 
 juce::String MelodyLibraryPanel::getSelectedMelodyId() const
 {
+    if (melodyList.getNumSelectedRows() != 1)
+        return {};
     int row = melodyList.getSelectedRow();
     if (row >= 0 && row < static_cast<int> (displayedMelodies.size()))
         return displayedMelodies[static_cast<size_t> (row)].id;
     return {};
+}
+
+std::vector<juce::String> MelodyLibraryPanel::getSelectedIds() const
+{
+    std::vector<juce::String> ids;
+    auto rows = melodyList.getSelectedRows();
+    for (int i = 0; i < rows.size(); ++i)
+    {
+        int row = rows[i];
+        if (row >= 0 && row < static_cast<int> (displayedMelodies.size()))
+            ids.push_back (displayedMelodies[static_cast<size_t> (row)].id);
+    }
+    return ids;
+}
+
+int MelodyLibraryPanel::getSelectionCount() const
+{
+    return melodyList.getNumSelectedRows();
 }
 
 //==============================================================================
@@ -1045,10 +1116,373 @@ void MelodyLibraryPanel::refreshStatsChart()
 
 void MelodyLibraryPanel::selectedRowsChanged (int)
 {
+    int count = getSelectionCount();
     auto id = getSelectedMelodyId();
-    const auto* mel = processorRef.melodyLibrary.getMelody (id);
     refreshStatsChart();
+
+    playButton.setEnabled (count == 1);
+    editButton.setEnabled (count == 1);
 
     if (onSelectionChanged)
         onSelectionChanged (id);
 }
+
+void MelodyLibraryPanel::listBoxItemClicked (int row, const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+        showContextMenu (row);
+}
+
+// --- Folder & Menu ---
+
+void MelodyLibraryPanel::refreshFolderCombo()
+{
+    int currentId = folderCombo.getSelectedId();
+    folderCombo.clear (juce::dontSendNotification);
+    folderCombo.addItem ("All Items", 1);
+    folderCombo.addItem ("Unfiled", 2);
+
+    const auto& folders = processorRef.melodyLibrary.getFolders().getAllFolders();
+    for (int i = 0; i < static_cast<int> (folders.size()); ++i)
+        folderCombo.addItem (folders[static_cast<size_t> (i)].name, i + 3);
+
+    if (currentId > 0 && folderCombo.indexOfItemId (currentId) >= 0)
+        folderCombo.setSelectedId (currentId, juce::dontSendNotification);
+    else
+        folderCombo.setSelectedId (1, juce::dontSendNotification);
+}
+
+void MelodyLibraryPanel::showMoreMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem (10, "Import MIDI...");
+    menu.addItem (11, "Export as MIDI...", getSelectionCount() == 1);
+    menu.addSeparator();
+    menu.addItem (20, "Import Library (.chordy)...");
+    menu.addItem (21, "Export Selected (.chordy)...", getSelectionCount() > 0);
+    menu.addItem (22, "Export All Melodies (.chordy)...");
+    menu.addSeparator();
+    menu.addItem (1, "New Folder...");
+
+    int folderId = folderCombo.getSelectedId();
+    bool viewingFolder = (folderId >= 3);
+    menu.addItem (2, "Rename Folder...", viewingFolder);
+    menu.addItem (3, "Delete Folder", viewingFolder);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&moreButton),
+        [this] (int result)
+        {
+            if (result == 10) // Import MIDI
+            {
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Import MIDI file...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory),
+                    "*.mid;*.midi");
+                auto flags = juce::FileBrowserComponent::openMode
+                           | juce::FileBrowserComponent::canSelectFiles;
+                fileChooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (! f.existsAsFile()) return;
+                    auto imported = MidiFileUtils::importMidiFile (f);
+                    if (! imported.success || imported.tracks.empty()) return;
+                    pendingMelody = MidiFileUtils::midiToMelody (
+                        imported.tracks[0], imported.bpm, imported.timeSigNum, imported.timeSigDen);
+                    pendingMelody.name = f.getFileNameWithoutExtension();
+                    enterEditing();
+                });
+            }
+            else if (result == 11) // Export as MIDI
+            {
+                auto selectedId = getSelectedMelodyId();
+                if (selectedId.isEmpty()) return;
+                const auto* m = processorRef.melodyLibrary.getMelody (selectedId);
+                if (m == nullptr) return;
+                auto defaultName = m->name.isNotEmpty() ? m->name : juce::String ("melody");
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Export as MIDI...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile (defaultName + ".mid"),
+                    "*.mid");
+                auto flags = juce::FileBrowserComponent::saveMode
+                           | juce::FileBrowserComponent::warnAboutOverwriting;
+                auto melCopy = *m;
+                fileChooser->launchAsync (flags, [melCopy] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (f == juce::File()) return;
+                    MidiFileUtils::exportMelodyToMidi (melCopy, f);
+                });
+            }
+            else if (result == 20) // Import Library
+            {
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Import Library...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory),
+                    "*.chordy");
+                auto flags = juce::FileBrowserComponent::openMode
+                           | juce::FileBrowserComponent::canSelectFiles;
+                fileChooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (! f.existsAsFile()) return;
+                    auto imported = LibraryExporter::parseCollection (f);
+                    if (! imported.success) return;
+                    auto merged = LibraryExporter::mergeIntoLibraries (
+                        imported, processorRef.voicingLibrary,
+                        processorRef.progressionLibrary, processorRef.melodyLibrary);
+                    processorRef.saveLibrariesToDisk();
+                    refreshFolderCombo();
+                    updateDisplayedMelodies();
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::InfoIcon, "Import Complete",
+                        "Added " + juce::String (merged.voicingsAdded) + " voicings, "
+                        + juce::String (merged.progressionsAdded) + " progressions, "
+                        + juce::String (merged.melodiesAdded) + " melodies.");
+                });
+            }
+            else if (result == 21) // Export Selected
+            {
+                auto ids = getSelectedIds();
+                if (ids.empty()) return;
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Export Selected...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile ("melodies.chordy"),
+                    "*.chordy");
+                auto flags = juce::FileBrowserComponent::saveMode
+                           | juce::FileBrowserComponent::warnAboutOverwriting;
+                fileChooser->launchAsync (flags, [this, ids] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (f == juce::File()) return;
+                    LibraryExporter::ExportOptions opts;
+                    opts.collectionName = f.getFileNameWithoutExtension();
+                    opts.melodyIds = ids;
+                    opts.includeVoicings = false;
+                    opts.includeProgressions = false;
+                    LibraryExporter::exportCollection (opts,
+                        processorRef.voicingLibrary, processorRef.progressionLibrary,
+                        processorRef.melodyLibrary, f);
+                });
+            }
+            else if (result == 22) // Export All Melodies
+            {
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Export All Melodies...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile ("all_melodies.chordy"),
+                    "*.chordy");
+                auto flags = juce::FileBrowserComponent::saveMode
+                           | juce::FileBrowserComponent::warnAboutOverwriting;
+                fileChooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (f == juce::File()) return;
+                    LibraryExporter::ExportOptions opts;
+                    opts.collectionName = f.getFileNameWithoutExtension();
+                    opts.includeVoicings = false;
+                    opts.includeProgressions = false;
+                    LibraryExporter::exportCollection (opts,
+                        processorRef.voicingLibrary, processorRef.progressionLibrary,
+                        processorRef.melodyLibrary, f);
+                });
+            }
+            else if (result == 1)
+            {
+                auto* aw = new juce::AlertWindow ("New Folder", "Enter folder name:",
+                                                   juce::MessageBoxIconType::NoIcon);
+                aw->addTextEditor ("name", "", "Name:");
+                aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [this, aw] (int r)
+                    {
+                        if (r == 1)
+                        {
+                            auto name = aw->getTextEditorContents ("name").trim();
+                            if (name.isNotEmpty())
+                            {
+                                Folder f;
+                                f.id = juce::Uuid().toString();
+                                f.name = name;
+                                f.sortOrder = processorRef.melodyLibrary.getFolders().size();
+                                processorRef.melodyLibrary.getFolders().addFolder (f);
+                                processorRef.saveLibrariesToDisk();
+                                refreshFolderCombo();
+                            }
+                        }
+                        delete aw;
+                    }), true);
+                if (auto* te = aw->getTextEditor ("name"))
+                    te->grabKeyboardFocus();
+            }
+            else if (result == 2)
+            {
+                int fi = folderCombo.getSelectedId() - 3;
+                const auto& folders = processorRef.melodyLibrary.getFolders().getAllFolders();
+                if (fi >= 0 && fi < static_cast<int> (folders.size()))
+                {
+                    auto currentName = folders[static_cast<size_t> (fi)].name;
+                    auto fId = folders[static_cast<size_t> (fi)].id;
+                    auto* aw = new juce::AlertWindow ("Rename Folder", "Enter new name:",
+                                                       juce::MessageBoxIconType::NoIcon);
+                    aw->addTextEditor ("name", currentName, "Name:");
+                    aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                        [this, aw, fId] (int r)
+                        {
+                            if (r == 1)
+                            {
+                                auto name = aw->getTextEditorContents ("name").trim();
+                                if (name.isNotEmpty())
+                                {
+                                    auto* folder = processorRef.melodyLibrary.getFolders().getFolder (fId);
+                                    if (folder != nullptr)
+                                    {
+                                        folder->name = name;
+                                        processorRef.saveLibrariesToDisk();
+                                        refreshFolderCombo();
+                                    }
+                                }
+                            }
+                            delete aw;
+                        }), true);
+                    if (auto* te = aw->getTextEditor ("name"))
+                        te->grabKeyboardFocus();
+                }
+            }
+            else if (result == 3)
+            {
+                int fi = folderCombo.getSelectedId() - 3;
+                const auto& folders = processorRef.melodyLibrary.getFolders().getAllFolders();
+                if (fi >= 0 && fi < static_cast<int> (folders.size()))
+                {
+                    auto fId = folders[static_cast<size_t> (fi)].id;
+                    for (auto& m : const_cast<std::vector<Melody>&> (processorRef.melodyLibrary.getAllMelodies()))
+                        if (m.folderId == fId)
+                            m.folderId = {};
+                    processorRef.melodyLibrary.getFolders().removeFolder (fId);
+                    processorRef.saveLibrariesToDisk();
+                    refreshFolderCombo();
+                    updateDisplayedMelodies();
+                }
+            }
+        });
+}
+
+juce::PopupMenu MelodyLibraryPanel::buildFolderSubmenu (int baseId)
+{
+    juce::PopupMenu sub;
+    sub.addItem (baseId, "New Folder...");
+    sub.addSeparator();
+    sub.addItem (baseId + 1, "Unfiled");
+    const auto& folders = processorRef.melodyLibrary.getFolders().getAllFolders();
+    for (int i = 0; i < static_cast<int> (folders.size()); ++i)
+        sub.addItem (baseId + 2 + i, folders[static_cast<size_t> (i)].name);
+    return sub;
+}
+
+void MelodyLibraryPanel::handleFolderSubmenuResult (int result, int baseId)
+{
+    if (result == baseId)
+    {
+        auto* aw = new juce::AlertWindow ("New Folder", "Enter folder name:",
+                                           juce::MessageBoxIconType::NoIcon);
+        aw->addTextEditor ("name", "", "Name:");
+        aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        aw->enterModalState (true, juce::ModalCallbackFunction::create (
+            [this, aw] (int r)
+            {
+                if (r == 1)
+                {
+                    auto name = aw->getTextEditorContents ("name").trim();
+                    if (name.isNotEmpty())
+                    {
+                        Folder f;
+                        f.id = juce::Uuid().toString();
+                        f.name = name;
+                        f.sortOrder = processorRef.melodyLibrary.getFolders().size();
+                        processorRef.melodyLibrary.getFolders().addFolder (f);
+                        processorRef.saveLibrariesToDisk();
+                        refreshFolderCombo();
+                        moveSelectedToFolder (f.id);
+                    }
+                }
+                delete aw;
+            }), true);
+        if (auto* te = aw->getTextEditor ("name"))
+            te->grabKeyboardFocus();
+    }
+    else if (result == baseId + 1)
+    {
+        moveSelectedToFolder ({});
+    }
+    else if (result >= baseId + 2)
+    {
+        const auto& folders = processorRef.melodyLibrary.getFolders().getAllFolders();
+        int fi = result - baseId - 2;
+        if (fi >= 0 && fi < static_cast<int> (folders.size()))
+            moveSelectedToFolder (folders[static_cast<size_t> (fi)].id);
+    }
+}
+
+void MelodyLibraryPanel::showContextMenu (int rowIndex)
+{
+    if (rowIndex < 0 || rowIndex >= static_cast<int> (displayedMelodies.size()))
+        return;
+
+    juce::PopupMenu menu;
+    menu.addSubMenu ("Move to Folder", buildFolderSubmenu (100));
+    menu.addItem (2, "Export as MIDI...");
+    menu.addSeparator();
+    menu.addItem (1, "Delete");
+
+    menu.showMenuAsync (juce::PopupMenu::Options(),
+        [this] (int result)
+        {
+            if (result == 2) // Export as MIDI
+            {
+                auto selectedId = getSelectedMelodyId();
+                if (selectedId.isEmpty()) return;
+                const auto* m = processorRef.melodyLibrary.getMelody (selectedId);
+                if (m == nullptr) return;
+                auto defaultName = m->name.isNotEmpty() ? m->name : juce::String ("melody");
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Export as MIDI...",
+                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile (defaultName + ".mid"),
+                    "*.mid");
+                auto flags = juce::FileBrowserComponent::saveMode
+                           | juce::FileBrowserComponent::warnAboutOverwriting;
+                auto melCopy = *m;
+                fileChooser->launchAsync (flags, [melCopy] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (f == juce::File()) return;
+                    MidiFileUtils::exportMelodyToMidi (melCopy, f);
+                });
+            }
+            else if (result == 1)
+                onDelete();
+            else if (result >= 100)
+                handleFolderSubmenuResult (result, 100);
+        });
+}
+
+void MelodyLibraryPanel::moveSelectedToFolder (const juce::String& targetFolderId)
+{
+    auto ids = getSelectedIds();
+    if (ids.empty()) return;
+
+    for (auto& m : const_cast<std::vector<Melody>&> (processorRef.melodyLibrary.getAllMelodies()))
+        for (const auto& id : ids)
+            if (m.id == id)
+                m.folderId = targetFolderId;
+
+    processorRef.saveLibrariesToDisk();
+    updateDisplayedMelodies();
+}
+

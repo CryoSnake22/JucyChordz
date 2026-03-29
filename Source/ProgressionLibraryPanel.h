@@ -2,6 +2,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "ProgressionModel.h"
+#include "MidiFileUtils.h"
+#include "LibraryExporter.h"
 #include "ProgressionChartComponent.h"
 #include "VoicingStatsChart.h"
 
@@ -25,6 +27,8 @@ public:
     void updateTimerCallback();
 
     juce::String getSelectedProgressionId() const;
+    std::vector<juce::String> getSelectedIds() const;
+    int getSelectionCount() const;
     void refreshStatsChart();
     void togglePlay();  // spacebar: play/stop in idle or edit mode
 
@@ -36,12 +40,15 @@ public:
     std::function<void (const std::vector<int>& midiNotes)> onChordPreview;
     std::function<void (const Progression& transposed)> onTransposedPreview;
 
+    void refreshFolderCombo();
+
 private:
     // ListBoxModel
     int getNumRows() override;
     void paintListBoxItem (int rowNumber, juce::Graphics& g, int width, int height,
                            bool rowIsSelected) override;
     void selectedRowsChanged (int lastRowClicked) override;
+    void listBoxItemClicked (int row, const juce::MouseEvent& e) override;
 
     AudioPluginAudioProcessor& processorRef;
 
@@ -51,6 +58,8 @@ private:
     // --- Idle mode components ---
     juce::Label headerLabel;
     juce::Label recordingIndicator;
+    juce::TextButton moreButton { "..." };
+    juce::ComboBox folderCombo;
     juce::TextEditor searchEditor;
     juce::ListBox progressionList;
     juce::TextButton recordButton { "Record" };
@@ -129,9 +138,16 @@ private:
     void onEditPlayToggle();
     void playChordPreview (const ProgressionChord& chord);
 
+    std::unique_ptr<juce::FileChooser> fileChooser;
     void setIdleModeVisible (bool v);
     void setEditModeVisible (bool v);
     void setConfirmModeVisible (bool v);
+
+    void showMoreMenu();
+    void showContextMenu (int rowIndex);
+    void moveSelectedToFolder (const juce::String& folderId);
+    juce::PopupMenu buildFolderSubmenu (int baseId);
+    void handleFolderSubmenuResult (int result, int baseId);
 
     void layoutIdleMode (juce::Rectangle<int> area);
     void layoutEditMode (juce::Rectangle<int> area);
