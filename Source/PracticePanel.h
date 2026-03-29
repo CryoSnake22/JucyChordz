@@ -129,6 +129,13 @@ private:
     int currentScaleDegree = 0;
     std::vector<int> scaleDegreeSequence;
 
+    // Two-level loop for Follow(scale)/Scale: outer = chromatic keys, inner = scale degrees
+    std::vector<int> scaleInnerSequence;   // inner loop: semitone offsets (Follow) or degree indices (Scale)
+    int innerIndex = 0;
+    int currentModulationKey = 0;          // current outer chromatic key (pitch class)
+    int currentModulationBaseMidi = 60;    // base MIDI for current modulation key
+    bool pendingModulationCountIn = false; // triggers 4-beat count-in at modulation boundary
+
     // Follow/Scale UI components
     juce::ComboBox scalePickerCombo;
     juce::ComboBox followSourceCombo;

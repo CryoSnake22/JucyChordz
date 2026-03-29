@@ -310,19 +310,39 @@ void PracticePanel::resized()
         int orderId = orderCombo.getSelectedId();
         bool isFollow = (orderId == 3);
         bool isScale = (orderId == 4);
+        bool isMelodySource = isFollow && followSourceCombo.getSelectedId() == 2;
 
+        // Control row: All/None + orderCombo (always)
         auto controlRow = area.removeFromBottom (24);
+        selectAllButton.setBounds (controlRow.removeFromLeft (40));
+        controlRow.removeFromLeft (4);
+        deselectAllButton.setBounds (controlRow.removeFromLeft (45));
+        controlRow.removeFromLeft (8);
+        orderCombo.setBounds (controlRow);
+        area.removeFromBottom (2);
 
-        if (! isFollow && ! isScale)
+        // Extra row for Follow/Scale: scale picker, follow source, or melody picker
+        if (isFollow)
         {
-            // Chromatic/Random: show All/None + orderCombo
-            selectAllButton.setBounds (controlRow.removeFromLeft (40));
-            controlRow.removeFromLeft (4);
-            deselectAllButton.setBounds (controlRow.removeFromLeft (45));
-            controlRow.removeFromLeft (8);
-            orderCombo.setBounds (controlRow);
+            auto pickerRow = area.removeFromBottom (22);
+            followSourceCombo.setBounds (pickerRow.removeFromLeft (80));
+            pickerRow.removeFromLeft (4);
+            if (isMelodySource)
+                melodyPickerCombo.setBounds (pickerRow);
+            else
+                scalePickerCombo.setBounds (pickerRow);
             area.removeFromBottom (2);
+        }
+        else if (isScale)
+        {
+            auto pickerRow = area.removeFromBottom (22);
+            scalePickerCombo.setBounds (pickerRow);
+            area.removeFromBottom (2);
+        }
 
+        // Key toggles (hidden for Follow/melody source only)
+        if (! isMelodySource)
+        {
             auto keyRow2 = area.removeFromBottom (22);
             int kw = keyRow2.getWidth() / 6;
             for (int i = 6; i < 12; ++i)
@@ -332,40 +352,6 @@ void PracticePanel::resized()
             auto keyRow1 = area.removeFromBottom (22);
             for (int i = 0; i < 6; ++i)
                 keyToggles[i].setBounds (keyRow1.removeFromLeft (kw));
-        }
-        else
-        {
-            // Follow/Scale: orderCombo on the control row
-            orderCombo.setBounds (controlRow);
-            area.removeFromBottom (2);
-
-            if (isFollow)
-            {
-                // Row 2: follow source combo + scale or melody picker
-                auto row2 = area.removeFromBottom (22);
-                followSourceCombo.setBounds (row2.removeFromLeft (80));
-                row2.removeFromLeft (4);
-
-                if (followSourceCombo.getSelectedId() == 2)
-                    melodyPickerCombo.setBounds (row2);
-                else
-                    scalePickerCombo.setBounds (row2);
-
-                area.removeFromBottom (2);
-
-                // Row 1: empty spacer (keep same height as key toggle rows)
-                area.removeFromBottom (22);
-            }
-            else
-            {
-                // Scale mode: scale picker
-                auto row2 = area.removeFromBottom (22);
-                scalePickerCombo.setBounds (row2);
-                area.removeFromBottom (2);
-
-                // Row 1: empty spacer
-                area.removeFromBottom (22);
-            }
         }
 
         area.removeFromBottom (4);
@@ -1174,6 +1160,30 @@ void PracticePanel::enterPrepPhase()
     currentChallenge = nextChallenge;
     targetNotes = computeTargetNotes (*voicing, currentChallenge);
 
+    // If modulating to a new key, insert a 4-beat count-in
+    if (pendingModulationCountIn)
+    {
+        pendingModulationCountIn = false;
+        timedPhase = TimedPhase::CountIn;
+        lastBeatInSequence = -1;
+        playPhaseScored = false;
+        hasWrongAttempt = false;
+        processorRef.tempoEngine.resetBeatPosition();
+        processorRef.tempoEngine.markChallengeStart();
+
+        juce::String keyName = ChordDetector::noteNameFromPitchClass (currentChallenge.keyIndex);
+        targetLabel.setText ("Modulating to " + keyName + "...", juce::dontSendNotification);
+        targetLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::textPrimary));
+        currentRootText = keyName;
+        currentRootColour = juce::Colour (ChordyTheme::textPrimary);
+        nextRootText = "";
+        feedbackLabel.setText ("", juce::dontSendNotification);
+        timingFeedbackLabel.setText ("", juce::dontSendNotification);
+        keyboardRef.clearAllColours();
+        keyboardRef.repaint();
+        return;
+    }
+
     // Show upcoming root dimmed as the main display (prep = getting ready)
     juce::String keyName = ChordDetector::noteNameFromPitchClass (currentChallenge.keyIndex);
     targetLabel.setText ("Up next: " + keyName, juce::dontSendNotification);
@@ -1443,18 +1453,21 @@ void PracticePanel::updateFollowScaleVisibility()
     int orderId = orderCombo.getSelectedId();
     bool isFollow = (orderId == 3);
     bool isScale = (orderId == 4);
-    bool showScalePicker = showingKeySelector && (isFollow || isScale);
-    bool showKeyToggles = showingKeySelector && ! isFollow && ! isScale;
+    bool isMelodySource = isFollow && followSourceCombo.getSelectedId() == 2;
 
+    // Key toggles visible for all modes EXCEPT Follow(melody)
+    bool showKeyToggles = showingKeySelector && ! isMelodySource;
     for (int i = 0; i < 12; ++i)
         keyToggles[i].setVisible (showKeyToggles);
     selectAllButton.setVisible (showKeyToggles);
     deselectAllButton.setVisible (showKeyToggles);
 
+    // Scale picker: Follow(scale) and Scale modes
+    scalePickerCombo.setVisible (showingKeySelector && ((isFollow && ! isMelodySource) || isScale));
+
+    // Follow source combo and melody picker
     followSourceCombo.setVisible (showingKeySelector && isFollow);
-    scalePickerCombo.setVisible (showScalePicker);
-    melodyPickerCombo.setVisible (showingKeySelector && isFollow
-                                  && followSourceCombo.getSelectedId() == 2);
+    melodyPickerCombo.setVisible (showingKeySelector && isMelodySource);
 
     // Disable Follow/Scale for non-voicing practice
     orderCombo.setItemEnabled (3, practiceType == PracticeType::Voicing);
@@ -1465,13 +1478,11 @@ void PracticePanel::updateFollowScaleVisibility()
         updateScalePickerAvailability();
     else if (isFollow)
     {
-        // Re-enable all scales for Follow mode (pure transposition, no restrictions)
         for (int i = 0; i < static_cast<int> (ScaleType::NumScaleTypes); ++i)
             scalePickerCombo.setItemEnabled (i + 1, true);
     }
 
-    // Populate melody picker when switching to melody source
-    if (isFollow && followSourceCombo.getSelectedId() == 2)
+    if (isFollow && isMelodySource)
         populateMelodyPicker();
 }
 
@@ -1479,22 +1490,46 @@ void PracticePanel::buildCustomKeySequence()
 {
     int orderId = orderCombo.getSelectedId();
 
+    // --- Helper: build chromatic key sequence from key toggles ---
+    auto buildChromaticFromToggles = [&]() {
+        customAllowedKeys.clear();
+        for (int i = 0; i < 12; ++i)
+            if (keyToggles[i].getToggleState())
+                customAllowedKeys.insert (i);
+
+        if (customAllowedKeys.empty())
+            for (int i = 0; i < 12; ++i)
+                customAllowedKeys.insert (i);
+
+        customKeySequence.clear();
+        customKeySequence.assign (customAllowedKeys.begin(), customAllowedKeys.end());
+
+        // Build chromatic up-and-back
+        if (customKeySequence.size() > 2)
+        {
+            auto descending = customKeySequence;
+            descending.erase (descending.begin());
+            descending.pop_back();
+            std::reverse (descending.begin(), descending.end());
+            customKeySequence.insert (customKeySequence.end(),
+                                      descending.begin(), descending.end());
+        }
+    };
+
     // --- Follow mode ---
     if (orderId == 3)
     {
         selectedScaleType = static_cast<ScaleType> (scalePickerCombo.getSelectedId() - 1);
-        const auto* voicing = processorRef.voicingLibrary.getVoicing (
-            practicingVoicingId.isNotEmpty() ? practicingVoicingId : selectedVoicingId);
-        scaleRootPitchClass = voicing ? voicing->rootPitchClass : 0;
 
         followSource = (followSourceCombo.getSelectedId() == 2)
             ? FollowSource::Melody : FollowSource::Scale;
 
-        customKeySequence.clear();
+        scaleInnerSequence.clear();
         scaleDegreeSequence.clear();
 
         if (followSource == FollowSource::Melody)
         {
+            // Melody follow: flat sequence, no chromatic modulation
             followMelodyId = {};
             int melIdx = melodyPickerCombo.getSelectedId() - 1;
             const auto& melodies = processorRef.melodyLibrary.getAllMelodies();
@@ -1504,84 +1539,73 @@ void PracticePanel::buildCustomKeySequence()
                 const auto* mel = processorRef.melodyLibrary.getMelody (followMelodyId);
                 if (mel != nullptr)
                     customKeySequence = ScaleModel::buildMelodyFollowSequence (*mel, practiceOctaveRef);
+                else
+                    customKeySequence.clear();
             }
-        }
-        else
-        {
-            customKeySequence = ScaleModel::buildScaleRootSequence (selectedScaleType, scaleRootPitchClass, practiceOctaveRef);
+            else
+                customKeySequence.clear();
+
+            if (customKeySequence.empty())
+                for (int i = 0; i < 12; ++i)
+                    customKeySequence.push_back (practiceOctaveRef - (practiceOctaveRef % 12) + i);
+
+            rootOrder = RootOrder::Follow;
+            customKeyIndex = 0;
+            innerIndex = 0;
+            return;
         }
 
-        if (customKeySequence.empty())
-        {
-            // Fallback to chromatic
-            for (int i = 0; i < 12; ++i)
-                customKeySequence.push_back (i);
-        }
+        // Follow(scale): two-level loop.
+        // Outer = chromatic keys from toggles, inner = scale degree offsets.
+        buildChromaticFromToggles();
+
+        // Build inner sequence: semitone offsets for one scale cycle (up to octave and back)
+        auto intervals = ScaleModel::getScaleIntervals (selectedScaleType);
+        for (int si : intervals)
+            scaleInnerSequence.push_back (si);
+        scaleInnerSequence.push_back (12);  // octave at top
+        int n = static_cast<int> (intervals.size());
+        // Descend all the way back to root (0)
+        for (int i = n - 1; i >= 0; --i)
+            scaleInnerSequence.push_back (intervals[static_cast<size_t> (i)]);
 
         rootOrder = RootOrder::Follow;
         customKeyIndex = 0;
+        innerIndex = 0;
         return;
     }
 
-    // --- Scale (diatonic) mode ---
+    // --- Scale (diatonic) mode: two-level loop ---
     if (orderId == 4)
     {
         selectedScaleType = static_cast<ScaleType> (scalePickerCombo.getSelectedId() - 1);
-        const auto* voicing = processorRef.voicingLibrary.getVoicing (
-            practicingVoicingId.isNotEmpty() ? practicingVoicingId : selectedVoicingId);
-        scaleRootPitchClass = voicing ? voicing->rootPitchClass : 0;
 
+        // Outer = chromatic keys from toggles
+        buildChromaticFromToggles();
+
+        // Inner = scale degree up-and-back (including octave)
         auto scaleIntervals = ScaleModel::getScaleIntervals (selectedScaleType);
         int numDegrees = static_cast<int> (scaleIntervals.size());
-
-        scaleDegreeSequence = ScaleModel::buildScaleDegreeUpAndBack (numDegrees);
-
-        // Build parallel pitch class sequence for display/stats
-        customKeySequence.clear();
-        for (int deg : scaleDegreeSequence)
-        {
-            // deg can be numDegrees (octave) so wrap with modulo
-            int pc = (scaleRootPitchClass + scaleIntervals[static_cast<size_t> (deg % numDegrees)]) % 12;
-            customKeySequence.push_back (pc);
-        }
+        scaleInnerSequence = ScaleModel::buildScaleDegreeUpAndBack (numDegrees);
 
         rootOrder = RootOrder::Scale;
         customKeyIndex = 0;
+        innerIndex = 0;
         currentScaleDegree = 0;
         return;
     }
 
-    // --- Chromatic / Random (existing logic) ---
-    customAllowedKeys.clear();
-    for (int i = 0; i < 12; ++i)
-        if (keyToggles[i].getToggleState())
-            customAllowedKeys.insert (i);
-
-    if (customAllowedKeys.empty())
-    {
-        // Nothing selected -- use all
-        for (int i = 0; i < 12; ++i)
-            customAllowedKeys.insert (i);
-    }
+    // --- Chromatic / Random (existing single-level logic) ---
+    scaleInnerSequence.clear();
+    buildChromaticFromToggles();
 
     rootOrder = (orderId == 2) ? RootOrder::Chromatic : RootOrder::Random;
 
-    customKeySequence.clear();
-    scaleDegreeSequence.clear();
-    customKeySequence.assign (customAllowedKeys.begin(), customAllowedKeys.end());
-
     if (rootOrder == RootOrder::Random)
     {
+        // Random replaces the up-and-back with a shuffle
+        customKeySequence.assign (customAllowedKeys.begin(), customAllowedKeys.end());
         std::shuffle (customKeySequence.begin(), customKeySequence.end(), rng);
-    }
-    else if (rootOrder == RootOrder::Chromatic && customKeySequence.size() > 2)
-    {
-        // Build up-and-back pattern: C, C#, ..., B, Bb, ..., C#
-        auto descending = customKeySequence;
-        descending.erase (descending.begin());      // remove first (avoid repeat at top)
-        descending.pop_back();                        // remove last (avoid repeat at bottom)
-        std::reverse (descending.begin(), descending.end());
-        customKeySequence.insert (customKeySequence.end(), descending.begin(), descending.end());
     }
 
     customKeyIndex = 0;
@@ -1592,42 +1616,83 @@ PracticeChallenge PracticePanel::getNextCustomChallenge()
     if (customKeySequence.empty())
         buildCustomKeySequence();
 
+    // --- Two-level loop for Follow(scale) / Scale ---
+    if (! scaleInnerSequence.empty())
+    {
+        // Advance inner index; if exhausted, advance outer chromatic key (modulation)
+        if (innerIndex >= static_cast<int> (scaleInnerSequence.size()))
+        {
+            innerIndex = 0;
+            customKeyIndex++;
+            pendingModulationCountIn = true;  // trigger count-in for new key
+        }
+
+        // Cycle outer when exhausted
+        if (customKeyIndex >= static_cast<int> (customKeySequence.size()))
+            customKeyIndex = 0;
+
+        int chromaticKey = customKeySequence[static_cast<size_t> (customKeyIndex)];
+        int semitoneShift = chromaticKey - (practiceOctaveRef % 12);
+        if (semitoneShift < -6) semitoneShift += 12;
+        if (semitoneShift > 6) semitoneShift -= 12;
+        int baseMidi = practiceOctaveRef + semitoneShift;
+
+        int innerVal = scaleInnerSequence[static_cast<size_t> (innerIndex++)];
+
+        PracticeChallenge challenge;
+        challenge.voicingId = practicingVoicingId;
+
+        if (rootOrder == RootOrder::Follow)
+        {
+            // innerVal = semitone offset from baseMidi
+            challenge.rootMidiNote = baseMidi + innerVal;
+            challenge.keyIndex = challenge.rootMidiNote % 12;
+        }
+        else // Scale
+        {
+            // innerVal = scale degree index
+            currentScaleDegree = innerVal;
+            currentModulationKey = chromaticKey;
+            currentModulationBaseMidi = baseMidi;
+
+            auto scaleIntervals = ScaleModel::getScaleIntervals (selectedScaleType);
+            int numDeg = static_cast<int> (scaleIntervals.size());
+            int pc = (chromaticKey + scaleIntervals[static_cast<size_t> (innerVal % numDeg)]) % 12;
+            challenge.keyIndex = pc;
+            challenge.rootMidiNote = baseMidi;  // not used directly for Scale
+        }
+
+        return challenge;
+    }
+
+    // --- Single-level loop: Chromatic / Random / Follow(melody) ---
     if (customKeyIndex >= static_cast<int> (customKeySequence.size()))
     {
-        // Remember the last key to avoid repeats at the boundary
         int lastKey = customKeySequence.back();
 
-        // Cycle: rebuild for next round
         if (rootOrder == RootOrder::Random)
         {
             std::shuffle (customKeySequence.begin(), customKeySequence.end(), rng);
-            // Avoid repeating the last key at the boundary
             if (customKeySequence.size() > 1 && customKeySequence.front() == lastKey)
                 std::swap (customKeySequence[0], customKeySequence[1]);
         }
         customKeyIndex = 0;
     }
 
-    int idx = customKeyIndex++;
-    int key = customKeySequence[static_cast<size_t> (idx)];
-
-    // Track scale degree for diatonic mode
-    if (rootOrder == RootOrder::Scale && ! scaleDegreeSequence.empty())
-        currentScaleDegree = scaleDegreeSequence[static_cast<size_t> (idx)];
+    int key = customKeySequence[static_cast<size_t> (customKeyIndex++)];
 
     PracticeChallenge challenge;
     challenge.voicingId = practicingVoicingId;
 
     if (rootOrder == RootOrder::Follow)
     {
-        // Follow mode: customKeySequence stores MIDI root notes (not pitch classes)
+        // Follow(melody): customKeySequence stores MIDI root notes
         challenge.rootMidiNote = key;
         challenge.keyIndex = key % 12;
     }
     else
     {
-        // Chromatic/Random/Scale: key is a pitch class (0-11).
-        // Use voicing's octaveReference to stay in the recorded octave.
+        // Chromatic/Random: key is a pitch class (0-11)
         challenge.keyIndex = key;
         int semitoneShift = key - (practiceOctaveRef % 12);
         if (semitoneShift < -6) semitoneShift += 12;
@@ -2627,8 +2692,8 @@ std::vector<int> PracticePanel::computeTargetNotes (const Voicing& v,
 {
     if (rootOrder == RootOrder::Scale)
         return ScaleModel::diatonicTranspose (v, selectedScaleType,
-                                              scaleRootPitchClass, currentScaleDegree,
-                                              practiceOctaveRef);
+                                              currentModulationKey, currentScaleDegree,
+                                              currentModulationBaseMidi);
 
     return VoicingLibrary::transposeToKey (v, challenge.rootMidiNote);
 }

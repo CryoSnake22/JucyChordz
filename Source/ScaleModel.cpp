@@ -85,13 +85,9 @@ std::vector<int> ScaleModel::buildScaleRootSequence (ScaleType type, int rootPC,
         sequence.push_back (baseMidi + i);
     sequence.push_back (baseMidi + 12);  // octave root at top
 
-    // Descending: from degree below octave back to degree above root
-    // (skip bottom endpoint so the loop boundary doesn't repeat the root)
-    if (n > 1)
-    {
-        for (int i = n - 1; i >= 1; --i)
-            sequence.push_back (baseMidi + intervals[static_cast<size_t> (i)]);
-    }
+    // Descending all the way back to root
+    for (int i = n - 1; i >= 0; --i)
+        sequence.push_back (baseMidi + intervals[static_cast<size_t> (i)]);
 
     return sequence;
 }
@@ -116,12 +112,9 @@ std::vector<int> ScaleModel::buildScaleDegreeUpAndBack (int numDegrees)
     for (int i = 0; i <= numDegrees; ++i)
         sequence.push_back (i);
 
-    // Descending: numDegrees-1, ..., 1 (skip bottom endpoint for clean loop)
-    if (numDegrees > 1)
-    {
-        for (int i = numDegrees - 1; i >= 1; --i)
-            sequence.push_back (i);
-    }
+    // Descending all the way back to root: numDegrees-1, ..., 0
+    for (int i = numDegrees - 1; i >= 0; --i)
+        sequence.push_back (i);
 
     return sequence;
 }
