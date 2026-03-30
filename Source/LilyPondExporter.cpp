@@ -297,11 +297,13 @@ juce::String midiNotesToLyChord (const std::vector<int>& notes, const juce::Stri
     return result;
 }
 
-// Split MIDI notes into treble (>= 60) and bass (< 60) sets.
-// Ensures bass has at least the lowest note if all are >= 60.
+// Split MIDI notes into treble (>= splitPoint) and bass (< splitPoint) sets.
+// splitPoint defaults to 60 (middle C) but should be adjusted for transpositions
+// to keep bass/treble assignment consistent with the original key.
 void splitTrebleBass (const std::vector<int>& midiNotes,
                       std::vector<int>& treble,
-                      std::vector<int>& bass)
+                      std::vector<int>& bass,
+                      int splitPoint = 60)
 {
     treble.clear();
     bass.clear();
@@ -311,7 +313,7 @@ void splitTrebleBass (const std::vector<int>& midiNotes,
 
     for (int n : sorted)
     {
-        if (n < 60)
+        if (n < splitPoint)
             bass.push_back (n);
         else
             treble.push_back (n);
@@ -439,9 +441,9 @@ juce::String generateVoicingLy (const Voicing& v, const ExportOptions& opts)
         chordNames += qualityToLyChordMode (v.quality);
         chordNames += " ";
 
-        // Split into treble/bass
+        // Split into treble/bass (adaptive split to preserve original staff assignment)
         std::vector<int> treble, bass;
-        splitTrebleBass (midiNotes, treble, bass);
+        splitTrebleBass (midiNotes, treble, bass, 60 + semitones);
 
         upperNotes += midiNotesToLyChord (treble, "1") + " ";
         lowerNotes += midiNotesToLyChord (bass, "1") + " ";
@@ -539,7 +541,12 @@ juce::String generateProgressionLy (const Progression& prog, const ExportOptions
     };
 
     // Helper: generate notes for one staff from events
-    struct StaffEvent { double start; double duration; std::vector<int> notes; };
+    struct StaffEvent {
+        double start;
+        double duration;
+        std::vector<int> notes;
+        std::vector<int> graceNotes;  // MIDI notes to render as acciaccatura before this event
+    };
 
     // Generate a single monophonic voice from non-overlapping events
     auto generateMonoVoice = [&] (const std::vector<StaffEvent>& events, double endBeat) -> juce::String
@@ -559,6 +566,17 @@ juce::String generateProgressionLy (const Progression& prog, const ExportOptions
                     if (tok.tieAfter) out += "~ ";
                     else out += " ";
                 }
+            }
+
+            // Render grace notes (acciaccatura) before the main chord.
+            // Grace notes render correctly inside polyphonic voices when LilyPond
+            // handles line breaks automatically (no forced \break at barlines).
+            if (! ev.graceNotes.empty())
+            {
+                out += "\\acciaccatura { ";
+                for (int gn : ev.graceNotes)
+                    out += midiNoteToLyPitch (gn) + "8 ";
+                out += "} ";
             }
 
             double dur = std::max (0.25, ev.duration);
@@ -703,7 +721,8 @@ juce::String generateProgressionLy (const Progression& prog, const ExportOptions
         if (voice2.empty())
             return generateMonoVoice (voice1, endBeat);
 
-        // Generate polyphonic output: << { \voiceOne ... } \\ { \voiceTwo ... } >>
+        // Grace notes render naturally inside their voice via \acciaccatura.
+        // LilyPond handles grace notes in individual voices within << \\ >> correctly.
         juce::String out;
         out += "<< { \\voiceOne ";
         out += generateMonoVoice (voice1, endBeat);
@@ -719,11 +738,8 @@ juce::String generateProgressionLy (const Progression& prog, const ExportOptions
     double actualEnd = 0.0;
     for (const auto& c : sampleChords)
         actualEnd = std::max (actualEnd, c.startBeat + c.durationBeats);
-    int barsPerKey = std::max (1, static_cast<int> (std::ceil (actualEnd / beatsPerBar)));
-    // Decide how many keys fit per line (2 if short enough, else 1)
-    int keysPerLine = (barsPerKey <= 4) ? 2 : 1;
-
     // Build all keys' content into parallel string streams
+    // (LilyPond auto-breaks at double barlines for optimal layout)
     juce::String allChordSymbols;
     juce::String allUpper;
     juce::String allLower;
@@ -765,29 +781,99 @@ juce::String generateProgressionLy (const Progression& prog, const ExportOptions
         // Extract individual notes from raw MIDI for accurate per-note rendering
         auto rawNotes = ProgressionRecorder::extractNotes (transposed.rawMidi);
 
-        // Quantize individual note timings to sixteenth grid
-        for (auto& n : rawNotes)
-        {
-            n.startBeat = snapBeat (n.startBeat);
-            n.durationBeats = std::max (0.25, snapBeat (n.durationBeats));
-        }
+        // Adaptive split point: preserves original treble/bass assignment after transposition
+        int splitPoint = 60 + semitones;
 
-        // Group notes by start beat AND quantized duration into staff events.
-        // Notes at the same start but different durations become separate events
-        // (e.g., a held note vs. a passing tone starting at the same beat).
+        // --- Grace note detection (before quantization) ---
+        // Short notes (< 0.3 beats) followed by a longer note within 0.5 beats
+        // on the same staff are appogiaturas. Store them keyed by target note index.
+        // Map: target note index -> list of grace MIDI notes
+        std::map<size_t, std::vector<int>> graceNotesForTarget;
+
+        // Sort by start beat for scanning
         std::sort (rawNotes.begin(), rawNotes.end(), [] (const ProgressionNote& a, const ProgressionNote& b) {
-            if (std::abs (a.startBeat - b.startBeat) < 0.01)
-                return a.durationBeats < b.durationBeats;
             return a.startBeat < b.startBeat;
         });
 
-        std::vector<StaffEvent> trebleEvents, bassEvents;
+        std::vector<bool> isGrace (rawNotes.size(), false);
+        for (size_t i = 0; i < rawNotes.size(); ++i)
+        {
+            if (rawNotes[i].durationBeats >= 0.3)
+                continue;  // not short enough for a grace note
 
-        // Build per-note events, grouping notes that share both start AND duration (within tolerance)
-        struct NoteWithDur { int midiNote; double start; double dur; };
+            bool isTreble = rawNotes[i].midiNote >= splitPoint;
+
+            // Find the closest-in-pitch longer note on the same staff within 0.5 beats
+            size_t bestTarget = rawNotes.size(); // invalid
+            int bestPitchDist = 999;
+
+            for (size_t j = i + 1; j < rawNotes.size(); ++j)
+            {
+                if (rawNotes[j].startBeat - rawNotes[i].startBeat > 0.5)
+                    break;  // too far away
+
+                bool targetTreble = rawNotes[j].midiNote >= splitPoint;
+                if (targetTreble != isTreble)
+                    continue;  // different staff
+
+                if (rawNotes[j].durationBeats > rawNotes[i].durationBeats
+                    && rawNotes[i].durationBeats < rawNotes[j].durationBeats * 0.5)
+                {
+                    int dist = std::abs (rawNotes[j].midiNote - rawNotes[i].midiNote);
+                    if (dist < bestPitchDist)
+                    {
+                        bestPitchDist = dist;
+                        bestTarget = j;
+                    }
+                }
+            }
+
+            if (bestTarget < rawNotes.size())
+            {
+                isGrace[i] = true;
+                graceNotesForTarget[bestTarget].push_back (rawNotes[i].midiNote);
+            }
+        }
+
+        // Remove grace notes from main list, but remember target associations
+        // Build a new note list without grace notes, and a map from old index to new index
+        std::vector<ProgressionNote> filteredNotes;
+        std::map<size_t, size_t> oldToNewIndex;
+        for (size_t i = 0; i < rawNotes.size(); ++i)
+        {
+            if (! isGrace[i])
+            {
+                oldToNewIndex[i] = filteredNotes.size();
+                filteredNotes.push_back (rawNotes[i]);
+            }
+        }
+
+        // Remap grace notes to new indices
+        std::map<size_t, std::vector<int>> remappedGraces;
+        for (auto& [oldTarget, graces] : graceNotesForTarget)
+        {
+            auto it = oldToNewIndex.find (oldTarget);
+            if (it != oldToNewIndex.end())
+                remappedGraces[it->second] = graces;
+        }
+
+        rawNotes = filteredNotes;
+        // --- End grace note detection ---
+
+        // Build per-note events with pre-sort index for grace note lookup
+        struct NoteWithDur { int midiNote; double start; double dur; size_t preSortIndex; };
         std::vector<NoteWithDur> allNoteEvents;
-        for (const auto& n : rawNotes)
-            allNoteEvents.push_back ({ n.midiNote, n.startBeat, n.durationBeats });
+        for (size_t ri = 0; ri < rawNotes.size(); ++ri)
+            allNoteEvents.push_back ({ rawNotes[ri].midiNote, rawNotes[ri].startBeat, rawNotes[ri].durationBeats, ri });
+
+        // Quantize individual note timings to sixteenth grid
+        for (auto& n : allNoteEvents)
+        {
+            n.start = snapBeat (n.start);
+            n.dur = std::max (0.25, snapBeat (n.dur));
+        }
+
+        std::vector<StaffEvent> trebleEvents, bassEvents;
 
         // Sort by start, then duration, then pitch
         std::sort (allNoteEvents.begin(), allNoteEvents.end(), [] (const NoteWithDur& a, const NoteWithDur& b) {
@@ -802,33 +888,54 @@ juce::String generateProgressionLy (const Progression& prog, const ExportOptions
             double groupStart = allNoteEvents[ni].start;
             double groupDur = allNoteEvents[ni].dur;
             std::vector<int> trebleNotes, bassNotes;
+            std::vector<int> trebleGraces, bassGraces;
 
             // Collect notes with same start AND similar duration (within 0.3 beats)
             while (ni < allNoteEvents.size()
                    && std::abs (allNoteEvents[ni].start - groupStart) < 0.01
                    && std::abs (allNoteEvents[ni].dur - groupDur) < 0.3)
             {
-                if (allNoteEvents[ni].midiNote >= 60)
+                // Collect any grace notes attached to this note
+                auto graceIt = remappedGraces.find (allNoteEvents[ni].preSortIndex);
+
+                if (allNoteEvents[ni].midiNote >= splitPoint)
+                {
                     trebleNotes.push_back (allNoteEvents[ni].midiNote);
+                    if (graceIt != remappedGraces.end())
+                        for (int gn : graceIt->second)
+                            trebleGraces.push_back (gn);
+                }
                 else
+                {
                     bassNotes.push_back (allNoteEvents[ni].midiNote);
+                    if (graceIt != remappedGraces.end())
+                        for (int gn : graceIt->second)
+                            bassGraces.push_back (gn);
+                }
                 ++ni;
             }
 
             if (! trebleNotes.empty())
-                trebleEvents.push_back ({ groupStart, groupDur, trebleNotes });
+                trebleEvents.push_back ({ groupStart, groupDur, trebleNotes, trebleGraces });
             if (! bassNotes.empty())
-                bassEvents.push_back ({ groupStart, groupDur, bassNotes });
+                bassEvents.push_back ({ groupStart, groupDur, bassNotes, bassGraces });
         }
 
         if (opts.grandStaff)
         {
-            allUpper += keyMark + generateStaffNotes (trebleEvents, endBeat);
-            allLower += generateStaffNotes (bassEvents, endBeat) + " ";
+            // Key mark goes in chord symbols (or upper staff if no chords).
+            if (! opts.includeChordSymbols)
+                allUpper += keyMark;
+            // Wrap each key's content in { } braces so grace notes and polyphony
+            // are scoped inside the key block (prevents grace notes leaking before barlines)
+            allUpper += "{ " + generateStaffNotes (trebleEvents, endBeat) + "} ";
+            allLower += "{ " + generateStaffNotes (bassEvents, endBeat) + "} ";
         }
         else
         {
-            allSingle += keyMark + generateStaffNotes (trebleEvents, endBeat);
+            if (! opts.includeChordSymbols)
+                allSingle += keyMark;
+            allSingle += "{ " + generateStaffNotes (trebleEvents, endBeat) + "} ";
         }
 
         // Double barline between keys
@@ -840,15 +947,9 @@ juce::String generateProgressionLy (const Progression& prog, const ExportOptions
             allSingle += "\\bar \"||\" ";
         }
 
-        // Line break control
-        bool endOfLine = ((ki + 1) % keysPerLine == 0);
-        if (endOfLine && ki + 1 < opts.keys.size())
-        {
-            allChordSymbols += "\\break\n      ";
-            allUpper += "\\break\n        ";
-            allLower += "\\break\n        ";
-            allSingle += "\\break\n      ";
-        }
+        // Let LilyPond auto-break at double barlines.
+        // Forced \break conflicts with grace notes at system boundaries
+        // (grace notes get pushed to a separate empty system).
     }
 
     // Build single score
@@ -866,13 +967,14 @@ juce::String generateProgressionLy (const Progression& prog, const ExportOptions
     {
         ly += "    \\new PianoStaff <<\n";
         ly += "      \\new Staff = \"upper\" \\absolute {\n";
-        ly += "        \\clef treble \\key c \\major \\time "
+        ly += "        \\clef treble \\key c \\major\n";
+        ly += "        \\numericTimeSignature \\time "
             + juce::String (beatsPerBar) + "/" + juce::String (timeSigDen) + "\n";
         ly += "        " + allUpper + "\n";
         ly += "      }\n";
-        ly += "      \\new Staff = \"lower\" \\absolute {\n";
-        ly += "        \\clef bass \\key c \\major \\time "
-            + juce::String (beatsPerBar) + "/" + juce::String (timeSigDen) + "\n";
+        ly += "      \\new Staff = \"lower\" \\with { \\omit TimeSignature } \\absolute {\n";
+        ly += "        \\clef bass \\key c \\major\n";
+        ly += "        \\time " + juce::String (beatsPerBar) + "/" + juce::String (timeSigDen) + "\n";
         ly += "        " + allLower + "\n";
         ly += "      }\n";
         ly += "    >>\n";
@@ -1045,6 +1147,9 @@ ExportResult renderToPdf (const juce::String& lyContent, const juce::File& outpu
     auto tempDir = juce::File::getSpecialLocation (juce::File::tempDirectory);
     auto lyFile = tempDir.getChildFile ("chordy_export_" + juce::String (juce::Random::getSystemRandom().nextInt (99999)) + ".ly");
     lyFile.replaceWithText (lyContent);
+
+    // Debug: also save to a known location for inspection
+    juce::File ("/tmp/chordy_debug.ly").replaceWithText (lyContent);
 
     // Output base name (lilypond appends .pdf)
     auto outputBase = outputPdf.getParentDirectory()
