@@ -323,8 +323,9 @@ void splitTrebleBass (const std::vector<int>& midiNotes,
     // keep them there and the other staff gets a rest.
 }
 
-// Generate the LilyPond header block
-juce::String generateHeader (const ExportOptions& opts)
+// Generate the LilyPond header block.
+// lineWidthMm > 0 constrains line-width to force fewer keys per line.
+juce::String generateHeader (const ExportOptions& opts, int lineWidthMm = 0)
 {
     juce::String ly;
     ly += "\\version \"2.24.0\"\n\n";
@@ -340,9 +341,19 @@ juce::String generateHeader (const ExportOptions& opts)
     ly += "\\paper {\n";
     ly += "  #(set-paper-size \"" + opts.paperSize + "\")\n";
     ly += "  indent = 0\n";
-    ly += "  system-system-spacing.basic-distance = #20\n";
-    ly += "  system-system-spacing.minimum-distance = #16\n";
-    ly += "  system-system-spacing.padding = #4\n";
+    if (lineWidthMm > 0)
+    {
+        ly += "  line-width = " + juce::String (lineWidthMm) + "\\mm\n";
+        ly += "  system-system-spacing.basic-distance = #14\n";
+        ly += "  system-system-spacing.minimum-distance = #10\n";
+        ly += "  system-system-spacing.padding = #2\n";
+    }
+    else
+    {
+        ly += "  system-system-spacing.basic-distance = #20\n";
+        ly += "  system-system-spacing.minimum-distance = #16\n";
+        ly += "  system-system-spacing.padding = #4\n";
+    }
     ly += "}\n\n";
 
     return ly;
@@ -499,7 +510,22 @@ juce::String generateVoicingLy (const Voicing& v, const ExportOptions& opts)
 
 juce::String generateProgressionLy (const Progression& prog, const ExportOptions& opts)
 {
-    juce::String ly = generateHeader (opts);
+    // Pre-compute bars per key to determine line-width constraint
+    int preBeatsPerBar = prog.timeSignatureNum;
+    auto preChords = quantizeChordsForExport (prog.chords, preBeatsPerBar);
+    double preEnd = 0.0;
+    for (const auto& c : preChords)
+        preEnd = std::max (preEnd, c.startBeat + c.durationBeats);
+    int preBarsPerKey = std::max (1, static_cast<int> (std::ceil (preEnd / preBeatsPerBar)));
+
+    // For multi-bar keys, constrain line-width so 1 key fits per line.
+    // LilyPond's auto-breaker then places grace notes correctly.
+    // ~52mm per bar. Only constrain if result < ~155mm (otherwise keys fill naturally).
+    int lineWidthMm = 0;
+    if (preBarsPerKey > 1 && preBarsPerKey <= 3)
+        lineWidthMm = preBarsPerKey * 52;
+
+    juce::String ly = generateHeader (opts, lineWidthMm);
 
     int beatsPerBar = prog.timeSignatureNum;
     int timeSigDen = prog.timeSignatureDen;
@@ -570,11 +596,9 @@ juce::String generateProgressionLy (const Progression& prog, const ExportOptions
             }
 
             // Render grace notes (acciaccatura) before the main chord.
-            // Skip beat-0 grace notes when 1 key per line (keysPerLine==1):
-            // they appear at system boundaries and get pushed to the previous system.
-            // Mid-bar grace notes (beat 4+) render correctly inside voices.
-            bool suppressGrace = (keysPerLine == 1 && ev.start < 0.2);
-            if (! ev.graceNotes.empty() && ! suppressGrace)
+            // With ragged-right + wide spacing, LilyPond auto-breaks correctly
+            // and places grace notes on the right system.
+            if (! ev.graceNotes.empty())
             {
                 out += "\\acciaccatura { ";
                 for (int gn : ev.graceNotes)
@@ -957,17 +981,6 @@ juce::String generateProgressionLy (const Progression& prog, const ExportOptions
         // Let LilyPond auto-break at double barlines.
         // Forced \break conflicts with grace notes at system boundaries
         // (grace notes get pushed to a separate empty system).
-    }
-
-    // For multi-bar progressions, constrain line-width so LilyPond's auto-breaker
-    // puts 1 key per line. This avoids forced \break which conflicts with grace notes.
-    // ~52mm per bar keeps each key on its own line on letter paper.
-    // ragged-right keeps content left-aligned instead of centered.
-    if (barsPerKey > 1)
-    {
-        int lineWidthMm = barsPerKey * 52;
-        if (lineWidthMm < 160)  // only constrain if narrower than default
-            ly += "\\paper { line-width = " + juce::String (lineWidthMm) + "\\mm ragged-right = ##t }\n\n";
     }
 
     // Build single score

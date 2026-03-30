@@ -42,7 +42,7 @@ All source in `Source/`. New `.cpp`/`.h` files **must** be added to `SOURCE_FILE
 - **Per-note independent scoring**, never chord-level. See `.claude/docs/recording-and-practice.md`.
 - **Avoid UTF-8 special characters** in displayed strings -- JUCE font rendering may not handle them.
 - No test infrastructure yet.
-- Planned: LilyPond PDF export, comping rhythm templates.
+- Planned: comping rhythm templates.
 
 ## Detailed Context
 
@@ -51,3 +51,4 @@ All source in `Source/`. New `.cpp`/`.h` files **must** be added to `SOURCE_FILE
 @.claude/docs/external-instrument.md
 @.claude/docs/theme-and-ui.md
 @.claude/docs/recording-and-practice.md
+@.claude/docs/lilypond-export.md

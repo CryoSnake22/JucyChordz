@@ -60,11 +60,10 @@ Voicing VoicingLibrary::createFromNotes (const std::vector<int>& midiNotes,
         v.velocities.push_back (idx < noteVelocities.size() ? noteVelocities[idx] : 100);
     }
 
-    // Auto-detect quality using ChordDetector
+    // Auto-detect quality using ChordDetector (root stays as lowest note;
+    // users can override manually for rootless voicings)
     auto chordResult = ChordDetector::detect (midiNotes);
     v.quality = chordResult.quality;
-    if (chordResult.isValid())
-        v.rootPitchClass = chordResult.rootPitchClass;
 
     return v;
 }

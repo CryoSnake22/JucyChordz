@@ -787,7 +787,7 @@ void VoicingLibraryPanel::showMoreMenu()
     menu.addItem (21, "Export Selected (.chordy)...", getSelectionCount() > 0);
     menu.addItem (22, "Export All Voicings (.chordy)...");
     menu.addSeparator();
-    menu.addItem (30, "Export Sheet Music (PDF)...", getSelectionCount() == 1);
+    menu.addItem (30, "Export Sheet Music (PDF) [Experimental]...", getSelectionCount() == 1);
     menu.addSeparator();
     menu.addItem (1, "New Folder...");
 

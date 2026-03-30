@@ -220,6 +220,18 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
   if (progressionRecorder.isRecording())
     progressionRecorder.processBlock(midiMessages, buffer.getNumSamples());
 
+  // Merge preview MIDI (voicing preview from GUI thread)
+  // Must happen BEFORE playback so that note-offs from stopProgressionPlayback()
+  // land before new note-ons — otherwise shared pitches get killed immediately.
+  {
+    juce::SpinLock::ScopedLockType lock(previewMidiLock);
+    if (! previewMidiBuffer.isEmpty()) {
+      for (const auto meta : previewMidiBuffer)
+        midiMessages.addEvent(meta.getMessage(), meta.samplePosition);
+      previewMidiBuffer.clear();
+    }
+  }
+
   // Progression playback — replay raw MIDI directly
   if (playbackActive.load(std::memory_order_relaxed)) {
     double bpm = *apvts.getRawParameterValue("bpm");
@@ -358,16 +370,6 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
       playbackNotesHigh.store(pHigh, std::memory_order_relaxed);
 
       melodyPlaybackSamplePos += 1.0;
-    }
-  }
-
-  // Merge preview MIDI (voicing preview from GUI thread)
-  {
-    juce::SpinLock::ScopedLockType lock(previewMidiLock);
-    if (! previewMidiBuffer.isEmpty()) {
-      for (const auto meta : previewMidiBuffer)
-        midiMessages.addEvent(meta.getMessage(), meta.samplePosition);
-      previewMidiBuffer.clear();
     }
   }
 

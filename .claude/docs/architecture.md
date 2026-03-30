@@ -30,6 +30,8 @@
 | `PracticePanel.h/.cpp` | Practice GUI for voicing/progression/melody. 4 order modes, scoring, chart preview. |
 | `MidiFileUtils.h/.cpp` | MIDI file import/export (480 TPQ, beat-relative timestamps). |
 | `LibraryExporter.h/.cpp` | .chordy XML collection format for sharing libraries. |
+| `LilyPondExporter.h/.cpp` | LilyPond .ly generation + PDF rendering. See `.claude/docs/lilypond-export.md`. |
+| `ExportSheetMusicDialog.h/.cpp` | Export options dialog: key selection, chord symbols, paper size. |
 | `PlaceholderPanel.h` | Legacy/unused header. |
 
 ## MIDI Data Flow
