@@ -92,6 +92,12 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
     orderCombo.onChange = [this] { updateFollowScaleVisibility(); resized(); repaint(); };
     addChildComponent (orderCombo);
 
+    inversionCombo.onChange = [this] { onInversionDropChanged(); };
+    addAndMakeVisible (inversionCombo);
+
+    dropCombo.onChange = [this] { onInversionDropChanged(); };
+    addAndMakeVisible (dropCombo);
+
     followSourceCombo.addItem ("Scale", 1);
     followSourceCombo.addItem ("Melody", 2);
     followSourceCombo.setSelectedId (1, juce::dontSendNotification);
@@ -395,6 +401,26 @@ void PracticePanel::resized()
     backingToggle.setBounds (toggleRow);
     area.removeFromBottom (4);
 
+    // Inversion / Drop row (voicing practice only)
+    bool showInvDrop = (practiceType == PracticeType::Voicing)
+                    && (inversionCombo.getNumItems() > 0);
+    if (showInvDrop)
+    {
+        auto invDropRow = area.removeFromBottom (24);
+        int halfW = (invDropRow.getWidth() - 4) / 2;
+        inversionCombo.setBounds (invDropRow.removeFromLeft (halfW));
+        invDropRow.removeFromLeft (4);
+        dropCombo.setBounds (invDropRow);
+        inversionCombo.setVisible (true);
+        dropCombo.setVisible (true);
+        area.removeFromBottom (4);
+    }
+    else
+    {
+        inversionCombo.setVisible (false);
+        dropCombo.setVisible (false);
+    }
+
     // Button row
     auto buttonRow = area.removeFromBottom (30);
     int buttonWidth = (buttonRow.getWidth() - 12) / 4;
@@ -480,6 +506,22 @@ void PracticePanel::setSelectedVoicingId (const juce::String& id)
         }
     }
 
+    // Update inversion/drop combos only when voicing actually changes
+    {
+        const auto* v = processorRef.voicingLibrary.getVoicing (id);
+        int numNotes = v ? static_cast<int> (v->intervals.size()) : 0;
+        int prevNumNotes = inversionCombo.getNumItems();
+        bool voicingChanged = (id != lastInvDropVoicingId);
+        lastInvDropVoicingId = id;
+
+        if (voicingChanged || numNotes != prevNumNotes)
+        {
+            currentInversion = 0;
+            currentDrop = 0;
+            updateInversionDropCombos (v);
+        }
+    }
+
     // Refresh scale picker availability when voicing changes
     if (orderCombo.getSelectedId() == 4)
         updateScalePickerAvailability();
@@ -515,6 +557,11 @@ void PracticePanel::setSelectedProgressionId (const juce::String& id)
         }
     }
 
+    // Clear inversion/drop for non-voicing practice
+    currentInversion = 0;
+    currentDrop = 0;
+    updateInversionDropCombos (nullptr);
+
     // Disable Follow/Scale for non-voicing practice; fall back if selected
     orderCombo.setItemEnabled (3, false);
     orderCombo.setItemEnabled (4, false);
@@ -543,6 +590,11 @@ void PracticePanel::setSelectedMelodyId (const juce::String& id)
             targetLabel.setText ("Select a melody and press Start", juce::dontSendNotification);
         }
     }
+
+    // Clear inversion/drop for non-voicing practice
+    currentInversion = 0;
+    currentDrop = 0;
+    updateInversionDropCombos (nullptr);
 
     // Disable Follow/Scale for non-voicing practice; fall back if selected
     orderCombo.setItemEnabled (3, false);
@@ -821,6 +873,138 @@ void PracticePanel::stopPractice()
     processorRef.saveLibrariesToDisk();
 }
 
+void PracticePanel::updateInversionDropCombos (const Voicing* voicing)
+{
+    inversionCombo.clear (juce::dontSendNotification);
+    dropCombo.clear (juce::dontSendNotification);
+
+    if (voicing == nullptr || voicing->intervals.size() < 2)
+    {
+        currentInversion = 0;
+        currentDrop = 0;
+        resized();
+        return;
+    }
+
+    int numNotes = static_cast<int> (voicing->intervals.size());
+
+    // Disable inversions if voicing spans more than one octave
+    bool spansOctave = (voicing->intervals.back() - voicing->intervals.front()) >= 12;
+
+    if (spansOctave)
+    {
+        inversionCombo.addItem ("Root", 1);
+        currentInversion = 0;
+    }
+    else
+    {
+        inversionCombo.addItem ("Root", 1);
+        static const char* ordinals[] = { "", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th" };
+        for (int i = 1; i < numNotes; ++i)
+        {
+            juce::String label = (i < 8) ? juce::String (ordinals[i]) : juce::String (i) + "th";
+            inversionCombo.addItem (label, i + 1);
+        }
+    }
+    inversionCombo.setSelectedId (currentInversion + 1, juce::dontSendNotification);
+
+    // Drop: None, Drop 2, Drop 3, ..., Drop (N-1)
+    dropCombo.addItem ("No Drop", 1);
+    for (int d = 2; d < numNotes; ++d)
+        dropCombo.addItem ("Drop " + juce::String (d), d);
+    dropCombo.setSelectedId (currentDrop < 2 ? 1 : currentDrop, juce::dontSendNotification);
+
+    resized();
+}
+
+std::vector<int> PracticePanel::applyCurrentTransforms (const std::vector<int>& notes) const
+{
+    auto result = notes;
+    if (currentInversion > 0)
+        result = VoicingLibrary::applyInversion (result, currentInversion);
+    if (currentDrop >= 2)
+        result = VoicingLibrary::applyDrop (result, currentDrop);
+    return result;
+}
+
+void PracticePanel::onInversionDropChanged()
+{
+    currentInversion = juce::jmax (0, inversionCombo.getSelectedId() - 1);
+    currentDrop = dropCombo.getSelectedId() < 2 ? 0 : dropCombo.getSelectedId();
+
+    // Get the current voicing
+    const auto& voicingId = practicingVoicingId.isNotEmpty() ? practicingVoicingId : selectedVoicingId;
+    const auto* voicing = processorRef.voicingLibrary.getVoicing (voicingId);
+    if (voicing == nullptr) return;
+
+    // Compute transformed notes
+    std::vector<int> notes;
+    if (practicing)
+    {
+        targetNotes = computeTargetNotes (*voicing, currentChallenge);
+        notes = targetNotes;
+    }
+    else
+    {
+        // Preview: use the voicing's own key
+        notes = VoicingLibrary::transposeToKey (*voicing, voicing->octaveReference);
+        if (currentInversion > 0)
+            notes = VoicingLibrary::applyInversion (notes, currentInversion);
+        if (currentDrop >= 2)
+            notes = VoicingLibrary::applyDrop (notes, currentDrop);
+    }
+
+    // Build note+velocity pairs, preserving velocity through transforms
+    std::vector<std::pair<int, float>> noteVels;
+    {
+        auto baseNotes = VoicingLibrary::transposeToKey (*voicing, voicing->octaveReference);
+        for (size_t i = 0; i < baseNotes.size(); ++i)
+        {
+            float vel = (i < voicing->velocities.size() && voicing->velocities[i] > 0)
+                ? static_cast<float> (voicing->velocities[i]) / 127.0f : 0.7f;
+            noteVels.push_back ({ baseNotes[i], vel });
+        }
+        // Apply inversion: move lowest N notes up an octave
+        std::sort (noteVels.begin(), noteVels.end());
+        for (int i = 0; i < currentInversion && i < static_cast<int> (noteVels.size()); ++i)
+            noteVels[static_cast<size_t> (i)].first += 12;
+        std::sort (noteVels.begin(), noteVels.end());
+        // Apply drop: Nth from top down an octave
+        if (currentDrop >= 2 && currentDrop < static_cast<int> (noteVels.size()))
+            noteVels[noteVels.size() - static_cast<size_t> (currentDrop)].first -= 12;
+        std::sort (noteVels.begin(), noteVels.end());
+    }
+
+    // Play preview with original velocities
+    int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
+    if (! chordPreviewNotes.empty())
+    {
+        for (int n : chordPreviewNotes)
+            processorRef.addPreviewMidi (juce::MidiMessage::noteOff (ch, n, 0.0f));
+        chordPreviewNotes.clear();
+    }
+
+    for (const auto& [n, vel] : noteVels)
+        processorRef.addPreviewMidi (juce::MidiMessage::noteOn (ch, n, vel));
+    chordPreviewNotes = notes;
+    chordPreviewFrames = chordPreviewHoldFrames;
+
+    // Highlight keyboard
+    keyboardRef.clearAllColours();
+    for (int n : notes)
+        keyboardRef.setKeyColour (n, KeyColour::Target);
+    keyboardRef.repaint();
+
+    // Detect chord name
+    auto result = ChordDetector::detect (notes);
+    if (result.isValid())
+        setClickedChordName (result.displayName, 300);
+
+    // Refresh voicing chart preview with new transforms
+    if (! practicing)
+        showVoicingChartPreview (voicingId);
+}
+
 void PracticePanel::tickChordPreview()
 {
     if (chordPreviewFrames > 0 && --chordPreviewFrames == 0)
@@ -959,7 +1143,21 @@ void PracticePanel::showVoicingChartPreview (const juce::String& voicingId)
     if (showingKeySelector && (orderId == 3 || orderId == 4))
         return;
 
-    auto notes = VoicingLibrary::transposeToKey (*v, v->octaveReference);
+    // Build note+velocity pairs, then apply inversion/drop together
+    auto baseNotes = VoicingLibrary::transposeToKey (*v, v->octaveReference);
+    std::vector<std::pair<int, int>> noteVels;
+    for (size_t i = 0; i < baseNotes.size(); ++i)
+    {
+        int vel = (i < v->velocities.size() && v->velocities[i] > 0) ? v->velocities[i] : 100;
+        noteVels.push_back ({ baseNotes[i], vel });
+    }
+    std::sort (noteVels.begin(), noteVels.end());
+    for (int i = 0; i < currentInversion && i < static_cast<int> (noteVels.size()); ++i)
+        noteVels[static_cast<size_t> (i)].first += 12;
+    std::sort (noteVels.begin(), noteVels.end());
+    if (currentDrop >= 2 && currentDrop < static_cast<int> (noteVels.size()))
+        noteVels[noteVels.size() - static_cast<size_t> (currentDrop)].first -= 12;
+    std::sort (noteVels.begin(), noteVels.end());
 
     Progression prog;
     prog.id = "voicing_preview";
@@ -969,13 +1167,12 @@ void PracticePanel::showVoicingChartPreview (const juce::String& voicingId)
     prog.totalBeats = 1.0;
 
     ProgressionChord chord;
-    chord.midiNotes.assign (notes.begin(), notes.end());
     chord.startBeat = 0.0;
     chord.durationBeats = 1.0;
 
-    for (size_t i = 0; i < notes.size(); ++i)
+    for (const auto& [note, vel] : noteVels)
     {
-        int vel = (i < v->velocities.size() && v->velocities[i] > 0) ? v->velocities[i] : 100;
+        chord.midiNotes.push_back (note);
         chord.midiVelocities.push_back (vel);
         chord.noteStartBeats.push_back (0.0);
         chord.noteDurations.push_back (1.0);
@@ -2865,12 +3062,21 @@ void PracticePanel::stopMelodyBacking()
 std::vector<int> PracticePanel::computeTargetNotes (const Voicing& v,
                                                      const PracticeChallenge& challenge)
 {
-    if (rootOrder == RootOrder::Scale)
-        return ScaleModel::diatonicTranspose (v, selectedScaleType,
-                                              currentModulationKey, currentScaleDegree,
-                                              currentModulationBaseMidi);
+    std::vector<int> notes;
 
-    return VoicingLibrary::transposeToKey (v, challenge.rootMidiNote);
+    if (rootOrder == RootOrder::Scale)
+        notes = ScaleModel::diatonicTranspose (v, selectedScaleType,
+                                               currentModulationKey, currentScaleDegree,
+                                               currentModulationBaseMidi);
+    else
+        notes = VoicingLibrary::transposeToKey (v, challenge.rootMidiNote);
+
+    if (currentInversion > 0)
+        notes = VoicingLibrary::applyInversion (notes, currentInversion);
+    if (currentDrop >= 2)
+        notes = VoicingLibrary::applyDrop (notes, currentDrop);
+
+    return notes;
 }
 
 void PracticePanel::updateScalePickerAvailability()

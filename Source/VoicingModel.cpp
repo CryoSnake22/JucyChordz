@@ -77,6 +77,33 @@ std::vector<int> VoicingLibrary::transposeToKey (const Voicing& v,
     return notes;
 }
 
+std::vector<int> VoicingLibrary::applyInversion (const std::vector<int>& notes, int inversion)
+{
+    if (notes.empty() || inversion <= 0 || inversion >= static_cast<int> (notes.size()))
+        return notes;
+
+    auto result = notes;
+    std::sort (result.begin(), result.end());
+    for (int i = 0; i < inversion; ++i)
+        result[static_cast<size_t> (i)] += 12;
+    std::sort (result.begin(), result.end());
+    return result;
+}
+
+std::vector<int> VoicingLibrary::applyDrop (const std::vector<int>& notes, int dropN)
+{
+    int n = static_cast<int> (notes.size());
+    if (n < 3 || dropN < 2 || dropN >= n)
+        return notes;
+
+    auto result = notes;
+    std::sort (result.begin(), result.end());
+    // Nth voice from top: index = size - dropN
+    result[static_cast<size_t> (n - dropN)] -= 12;
+    std::sort (result.begin(), result.end());
+    return result;
+}
+
 const Voicing* VoicingLibrary::findByNotes (const std::vector<int>& midiNotes,
                                              juce::String& outDisplayName) const
 {

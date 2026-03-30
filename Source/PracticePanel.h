@@ -68,6 +68,7 @@ public:
     void highlightNotesAtBeat (double beat);
     void highlightMelodyNotesAtBeat (double beat);
     void showVoicingChartPreview (const juce::String& voicingId);
+    std::vector<int> applyCurrentTransforms (const std::vector<int>& notes) const;
     juce::String getPlaybackChordName() const;
     juce::String getClickedChordName() const { return clickedChordName; }
     void setClickedChordName (const juce::String& name, int frames = 60) { clickedChordName = name; clickedChordFrames = frames; }
@@ -128,6 +129,15 @@ private:
     juce::TextButton selectAllButton { "All" };
     juce::TextButton deselectAllButton { "None" };
     juce::ComboBox orderCombo;
+
+    // Inversion / Drop (voicing practice only)
+    juce::ComboBox inversionCombo;
+    juce::ComboBox dropCombo;
+    int currentInversion = 0;  // 0 = root position
+    int currentDrop = 0;       // 0 = none, 2 = drop-2, 3 = drop-3, etc.
+    juce::String lastInvDropVoicingId;
+    void updateInversionDropCombos (const Voicing* voicing);
+    void onInversionDropChanged();
 
     // Custom practice state
     bool customMode = false;

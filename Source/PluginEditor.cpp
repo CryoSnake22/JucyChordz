@@ -66,11 +66,12 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
           param->setValueNotifyingHost(1.0f);
       practicePanel.startPractice(voicingId);
     } else if (voicingId.isNotEmpty()) {
-      // Preview: highlight original voicing notes on keyboard + play via synth + show chart
+      // Preview: highlight voicing notes (with inversion/drop) on keyboard + play via synth
       keyboard.clearAllColours();
       const auto *v = processorRef.voicingLibrary.getVoicing(voicingId);
       if (v != nullptr) {
         auto vnotes = VoicingLibrary::transposeToKey(*v, v->octaveReference);
+        vnotes = practicePanel.applyCurrentTransforms(vnotes);
         for (int note : vnotes)
           keyboard.setKeyColour(note, KeyColour::Target);
         startVoicingPreview(vnotes, v->velocities);
@@ -86,8 +87,9 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
   };
   // Stats chart key preview → play voicing in clicked key
   voicingLibraryPanel.onKeyPreview = [this](const std::vector<int>& vnotes, const std::vector<int>& velocities) {
-    startVoicingPreview(vnotes, velocities);
-    auto result = ChordDetector::detect(vnotes);
+    auto transformed = practicePanel.applyCurrentTransforms(vnotes);
+    startVoicingPreview(transformed, velocities);
+    auto result = ChordDetector::detect(transformed);
     if (result.isValid())
       practicePanel.setClickedChordName(result.displayName, 40);
     keyboardHighlightFramesRemaining = keyboardHighlightTimeout;
@@ -810,6 +812,7 @@ bool AudioPluginAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
         if (v != nullptr)
         {
           auto notes = VoicingLibrary::transposeToKey (*v, v->octaveReference);
+          notes = practicePanel.applyCurrentTransforms (notes);
           startVoicingPreview (notes, v->velocities);
         }
       }
