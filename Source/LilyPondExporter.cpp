@@ -143,6 +143,52 @@ double snapDuration (double beats)
     return best;
 }
 
+// Snap a beat position to the nearest grid position (resolution = 0.25 beats = sixteenth note)
+double snapBeat (double beat, double resolution = 0.25)
+{
+    return std::round (beat / resolution) * resolution;
+}
+
+// Quantize progression chords for clean notation export.
+// Snaps start beats and durations to the nearest grid, removes micro-gaps.
+std::vector<ProgressionChord> quantizeChordsForExport (const std::vector<ProgressionChord>& chords, int beatsPerBar)
+{
+    if (chords.empty()) return chords;
+
+    std::vector<ProgressionChord> result;
+    result.reserve (chords.size());
+
+    for (size_t i = 0; i < chords.size(); ++i)
+    {
+        auto c = chords[i];
+
+        // Snap start beat to nearest sixteenth
+        c.startBeat = snapBeat (c.startBeat);
+
+        // Snap duration: extend to meet the next chord or end of bar
+        if (i + 1 < chords.size())
+        {
+            double nextStart = snapBeat (chords[i + 1].startBeat);
+            c.durationBeats = nextStart - c.startBeat;
+        }
+        else
+        {
+            // Last chord: snap duration to fill to end of bar
+            double snappedDur = snapBeat (c.durationBeats);
+            if (snappedDur < 0.25) snappedDur = 0.25;
+            double endBeat = c.startBeat + snappedDur;
+            // Round up to bar boundary
+            double barEnd = std::ceil (endBeat / beatsPerBar) * beatsPerBar;
+            c.durationBeats = barEnd - c.startBeat;
+        }
+
+        if (c.durationBeats < 0.25) c.durationBeats = 0.25;
+        result.push_back (c);
+    }
+
+    return result;
+}
+
 // Convert a beat duration to a LilyPond duration string.
 // Only handles values that map to a single note (from the grid).
 juce::String singleBeatsToDuration (double beats)
@@ -447,6 +493,9 @@ juce::String generateProgressionLy (const Progression& prog, const ExportOptions
         auto transposed = (semitones == 0)
             ? prog
             : ProgressionLibrary::transposeProgression (prog, semitones);
+
+        // Quantize chord timing for clean notation
+        transposed.chords = quantizeChordsForExport (transposed.chords, beatsPerBar);
 
         // Score with key label in header (prevents orphan labels at page breaks)
         ly += "\\score {\n  <<\n";
