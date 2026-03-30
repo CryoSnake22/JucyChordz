@@ -145,16 +145,20 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
 
         if (chordIdx < 0 || chordIdx >= static_cast<int> (previewProgression.chords.size()))
         {
-            // Deselect: clear keyboard + hide voicing button
-            keyboardRef.clearAllColours();
-            keyboardRef.repaint();
-            voicingButton.setVisible (false);
-            resized();
+            clearChordSelection();
             return;
         }
 
-        double clickBeat = practiceChart.getLastClickedBeat();
+        // Release any previously previewing notes before new ones
         int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
+        if (! chordPreviewNotes.empty())
+        {
+            for (int note : chordPreviewNotes)
+                processorRef.addPreviewMidi (juce::MidiMessage::noteOff (ch, note, 0.0f));
+            chordPreviewNotes.clear();
+        }
+
+        double clickBeat = practiceChart.getLastClickedBeat();
 
         // Scan ALL chords for notes active at the clicked beat
         std::vector<int> activeNotesMidi;
@@ -191,21 +195,19 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
         for (size_t i = 0; i < activeNotesMidi.size(); ++i)
             processorRef.addPreviewMidi (juce::MidiMessage::noteOn (ch, activeNotesMidi[i], activeVelocities[i]));
 
+        chordPreviewNotes = activeNotesMidi;
+        chordPreviewFrames = chordPreviewHoldFrames;
+
         // Show chord name in top display
         const auto& clickedChord = previewProgression.chords[static_cast<size_t> (chordIdx)];
         clickedChordName = clickedChord.getDisplayName();
-        clickedChordFrames = 60; // ~1 second at 60Hz
+        clickedChordFrames = 300; // 5 seconds at 60Hz
 
         // Highlight keyboard
         keyboardRef.clearAllColours();
         for (int note : activeNotesMidi)
             keyboardRef.setKeyColour (note, KeyColour::Target);
         keyboardRef.repaint();
-
-        juce::Timer::callAfterDelay (600, [this, ch, notes = activeNotesMidi]() {
-            for (int note : notes)
-                processorRef.addPreviewMidi (juce::MidiMessage::noteOff (ch, note, 0.0f));
-        });
 
         // Check if these notes match an existing voicing
         clickedChordMidiNotes = activeNotesMidi;
@@ -241,30 +243,35 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
             processorRef.stopMelodyPlayback();
         if (noteIdx < 0 || noteIdx >= static_cast<int> (previewMelody.notes.size()))
         {
-            keyboardRef.clearAllColours();
-            keyboardRef.repaint();
+            clearMelodySelection();
             return;
+        }
+
+        // Release any previously previewing note
+        int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
+        if (melodyPreviewNote >= 0)
+        {
+            processorRef.addPreviewMidi (juce::MidiMessage::noteOff (ch, melodyPreviewNote, 0.0f));
+            melodyPreviewNote = -1;
         }
 
         const auto& note = previewMelody.notes[static_cast<size_t> (noteIdx)];
         int midiNote = 60 + previewMelody.keyPitchClass + note.intervalFromKeyRoot;
         midiNote = juce::jlimit (0, 127, midiNote);
-        int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
         float vel = note.velocity > 0 ? static_cast<float> (note.velocity) / 127.0f : 0.7f;
         processorRef.addPreviewMidi (juce::MidiMessage::noteOn (ch, midiNote, vel));
 
+        melodyPreviewNote = midiNote;
+        melodyPreviewFrames = melodyPreviewHoldFrames;
+
         // Show note name in top display
         clickedChordName = ChordDetector::noteNameFromPitchClass (midiNote % 12);
-        clickedChordFrames = 40; // ~0.7s
+        clickedChordFrames = 300; // 5 seconds at 60Hz
 
         // Highlight keyboard
         keyboardRef.clearAllColours();
         keyboardRef.setKeyColour (midiNote, KeyColour::Target);
         keyboardRef.repaint();
-
-        juce::Timer::callAfterDelay (400, [this, ch, midiNote]() {
-            processorRef.addPreviewMidi (juce::MidiMessage::noteOff (ch, midiNote, 0.0f));
-        });
     };
 
     practiceMLChartViewport.setViewedComponent (&practiceMLChart, false);
@@ -750,6 +757,8 @@ void PracticePanel::startPractice (const juce::String& voicingId)
 
 void PracticePanel::stopPractice()
 {
+    clearChordSelection();
+    clearMelodySelection();
     practicing = false;
     challengeCompleted = false;
     timedPhase = TimedPhase::Inactive;
@@ -810,6 +819,53 @@ void PracticePanel::stopPractice()
 
     // Persist SR data changes from this practice session
     processorRef.saveLibrariesToDisk();
+}
+
+void PracticePanel::tickChordPreview()
+{
+    if (chordPreviewFrames > 0 && --chordPreviewFrames == 0)
+        clearChordSelection();
+}
+
+void PracticePanel::clearChordSelection()
+{
+    if (! chordPreviewNotes.empty())
+    {
+        int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
+        for (int note : chordPreviewNotes)
+            processorRef.addPreviewMidi (juce::MidiMessage::noteOff (ch, note, 0.0f));
+        chordPreviewNotes.clear();
+    }
+    chordPreviewFrames = 0;
+    practiceChart.setSelectedChord (-1);
+    practiceChart.clearNoteStates();
+    practiceChart.repaint();
+    keyboardRef.clearAllColours();
+    keyboardRef.repaint();
+    voicingButton.setVisible (false);
+    resized();
+}
+
+void PracticePanel::tickMelodyPreview()
+{
+    if (melodyPreviewFrames > 0 && --melodyPreviewFrames == 0)
+        clearMelodySelection();
+}
+
+void PracticePanel::clearMelodySelection()
+{
+    if (melodyPreviewNote >= 0)
+    {
+        int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
+        processorRef.addPreviewMidi (juce::MidiMessage::noteOff (ch, melodyPreviewNote, 0.0f));
+        melodyPreviewNote = -1;
+    }
+    melodyPreviewFrames = 0;
+    practiceMLChart.setHighlightedNoteIndex (-1);
+    practiceMLChart.clearNoteStates();
+    practiceMLChart.repaint();
+    keyboardRef.clearAllColours();
+    keyboardRef.repaint();
 }
 
 // --- Chart preview (non-practice) ---

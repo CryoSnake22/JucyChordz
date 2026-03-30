@@ -109,6 +109,10 @@ private:
   int keyboardHighlightFramesRemaining = 0;
   static constexpr int keyboardHighlightTimeout = 240;
 
+  // Track playback state to deselect chart on stop
+  bool wasPlayingProgression = false;
+  bool wasPlayingMelody = false;
+
   void startVoicingPreview (const std::vector<int>& notes, const std::vector<int>& velocities = {});
   void stopVoicingPreview();
 

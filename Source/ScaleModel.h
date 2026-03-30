@@ -23,6 +23,8 @@ enum class ScaleType
     DiminishedHW,
     DiminishedWH,
     Chromatic,
+    BebopMajor,
+    BebopDominant,
     NumScaleTypes
 };
 

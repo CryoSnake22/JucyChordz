@@ -543,6 +543,20 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
 
   // Tick down clicked chord display timer
   practicePanel.tickClickedChord();
+  practicePanel.tickChordPreview();
+  practicePanel.tickMelodyPreview();
+
+  // Deselect charts when playback starts or stops
+  {
+    bool nowPlayingProg = processorRef.isPlayingProgression();
+    bool nowPlayingMel = processorRef.isPlayingMelody();
+    if (wasPlayingProgression != nowPlayingProg)
+      practicePanel.clearChordSelection();
+    if (wasPlayingMelody != nowPlayingMel)
+      practicePanel.clearMelodySelection();
+    wasPlayingProgression = nowPlayingProg;
+    wasPlayingMelody = nowPlayingMel;
+  }
 
   // Update recording state machines
   voicingLibraryPanel.updateRecording(notes);

@@ -73,6 +73,10 @@ public:
     void setClickedChordName (const juce::String& name, int frames = 60) { clickedChordName = name; clickedChordFrames = frames; }
     void clearClickedChordName() { clickedChordName = {}; clickedChordFrames = 0; }
     void tickClickedChord() { if (clickedChordFrames > 0 && --clickedChordFrames == 0) clickedChordName = {}; }
+    void tickChordPreview();
+    void clearChordSelection();
+    void tickMelodyPreview();
+    void clearMelodySelection();
 
 private:
     juce::String selectedVoicingId;
@@ -98,6 +102,12 @@ private:
     juce::String clickedVoicingMatchId;
     std::vector<int> clickedChordMidiNotes;
     std::vector<int> clickedChordVelocities;
+    std::vector<int> chordPreviewNotes;
+    int chordPreviewFrames = 0;
+    static constexpr int chordPreviewHoldFrames = 300; // 5 seconds at 60Hz
+    int melodyPreviewNote = -1;
+    int melodyPreviewFrames = 0;
+    static constexpr int melodyPreviewHoldFrames = 300; // 5 seconds at 60Hz
     AudioPluginAudioProcessor& processorRef;
     ChordyKeyboardComponent& keyboardRef;
 
