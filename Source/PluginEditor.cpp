@@ -672,7 +672,12 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
 void AudioPluginAudioProcessorEditor::startVoicingPreview (const std::vector<int>& notes,
                                                             const std::vector<int>& velocities)
 {
-  stopVoicingPreview();
+  // Don't call stopVoicingPreview() here -- startProgressionPlayback() will
+  // cleanly stop any active playback and send note-offs on the audio thread.
+  // Calling stopVoicingPreview() would inject note-offs into the preview buffer
+  // that race with the new playback's note-ons, causing a click.
+  previewNotes.clear();
+  previewFramesRemaining = 0;
 
   int channel = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
 
