@@ -2,6 +2,7 @@
 
 #include "VoicingModel.h"
 #include "ProgressionModel.h"
+#include "ProgressionRecorder.h"
 #include "MelodyModel.h"
 #include <juce_core/juce_core.h>
 
