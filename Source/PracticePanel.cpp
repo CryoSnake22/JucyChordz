@@ -61,6 +61,8 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
     // Toggle colors inherited from LookAndFeel
     addAndMakeVisible (timedToggle);
     addAndMakeVisible (drillToggle);
+    autoBpmToggle.setToggleState (true, juce::dontSendNotification); // default on
+    addChildComponent (autoBpmToggle);
 
     // Key selector toggles (hidden by default)
     static const char* noteNames[] = { "C", "Db", "D", "Eb", "E", "F",
@@ -413,24 +415,38 @@ void PracticePanel::resized()
 
     // Toggle row
     auto toggleRow = area.removeFromBottom (24);
-    int toggleWidth = toggleRow.getWidth() / 4;
+    int numToggles = 3; // Timed, Drill, + one of Detailed/Backing/AutoBPM
+    if (drillActive) numToggles = 3; // Timed, Drill, Auto BPM
+    int toggleWidth = toggleRow.getWidth() / numToggles;
     timedToggle.setBounds (toggleRow.removeFromLeft (toggleWidth));
     drillToggle.setBounds (toggleRow.removeFromLeft (toggleWidth));
     // Disable drill for Follow/Scale/Free
     bool drillAllowed = (rootOrder == RootOrder::Chromatic || rootOrder == RootOrder::Random);
     drillToggle.setEnabled (drillAllowed && ! practicing);
-    if (practiceType == PracticeType::Progression)
+
+    // Show Auto BPM when drill is active, else show practice-type-specific toggle
+    if (drillActive)
     {
-        progDetailedToggle.setBounds (toggleRow.removeFromLeft (toggleRow.getWidth() / 2));
-        progDetailedToggle.setVisible (true);
+        autoBpmToggle.setVisible (true);
+        autoBpmToggle.setBounds (toggleRow);
+        progDetailedToggle.setVisible (false);
         backingToggle.setVisible (false);
     }
     else
     {
-        progDetailedToggle.setVisible (false);
-        backingToggle.setVisible (true);
+        autoBpmToggle.setVisible (false);
+        if (practiceType == PracticeType::Progression)
+        {
+            progDetailedToggle.setBounds (toggleRow.removeFromLeft (toggleRow.getWidth() / 2));
+            progDetailedToggle.setVisible (true);
+        }
+        else
+        {
+            progDetailedToggle.setVisible (false);
+        }
+        backingToggle.setVisible (practiceType == PracticeType::Melody);
+        backingToggle.setBounds (toggleRow);
     }
-    backingToggle.setBounds (toggleRow);
     area.removeFromBottom (4);
 
     // Hide inv/drop when not in custom mode
@@ -927,6 +943,9 @@ void PracticePanel::stopPractice()
 
     // Persist SR data changes from this practice session
     processorRef.saveLibrariesToDisk();
+
+    resized();
+    repaint();
 }
 
 void PracticePanel::updateInversionDropCombos (const Voicing* voicing)
@@ -1062,6 +1081,22 @@ void PracticePanel::onInversionDropChanged()
     // Refresh voicing chart preview with new transforms
     if (! practicing)
         showVoicingChartPreview (voicingId);
+
+    // Show Save Voicing button for transformed voicing
+    if (! practicing && (currentInversion > 0 || ! currentDrop.empty()))
+    {
+        clickedChordMidiNotes.clear();
+        clickedChordVelocities.clear();
+        for (const auto& [n, vel] : noteVels)
+        {
+            clickedChordMidiNotes.push_back (n);
+            clickedChordVelocities.push_back (static_cast<int> (vel * 127.0f));
+        }
+        clickedVoicingMatchId = {};
+        voicingButton.setButtonText ("Save Voicing");
+        voicingButton.setVisible (true);
+        resized();
+    }
 }
 
 void PracticePanel::tickChordPreview()
@@ -1959,12 +1994,9 @@ void PracticePanel::onCustomToggle()
         showingKeySelector ? juce::Colour (ChordyTheme::accentMuted)
                            : getLookAndFeel().findColour (juce::TextButton::buttonColourId));
 
-    // Stop exercise preview and clear chart when closing custom panel
+    // Stop exercise preview when closing custom panel (but keep chart preview)
     if (! showingKeySelector)
-    {
         stopExercisePreview();
-        clearChartPreview();
-    }
 
     resized();
     repaint();
@@ -2013,11 +2045,9 @@ void PracticePanel::updateFollowScaleVisibility()
     // Exercise play button: visible in Follow/Scale modes
     exercisePlayButton.setVisible (showingKeySelector && (isFollow || isScale));
 
-    // Rebuild exercise chart preview when mode changes
+    // Rebuild exercise chart preview when mode changes (only Follow/Scale)
     if (showingKeySelector && (isFollow || isScale))
         buildExercisePreviewProgression();
-    else if (showingKeySelector)
-        clearChartPreview();
 }
 
 void PracticePanel::buildCustomKeySequence()
@@ -3044,26 +3074,20 @@ void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
 
             previousFramePitchClasses = currentPCs;
 
-            // Build list of candidate notes to check: current target + next unscored note (for anticipation)
+            // Build list of ALL candidate notes active at current beat (supports overlapping notes)
             std::vector<int> candidates;
-            if (targetNoteIdx >= 0 && melodyTimedScored.count (targetNoteIdx) == 0)
-                candidates.push_back (targetNoteIdx);
-            // Also check the next note (early play / anticipation)
-            int nextIdx = (targetNoteIdx >= 0) ? targetNoteIdx + 1 : melodyNoteIndex;
-            if (nextIdx < static_cast<int> (transposedMelody.notes.size())
-                && melodyTimedScored.count (nextIdx) == 0
-                && (candidates.empty() || nextIdx != candidates[0]))
+            for (int ni = 0; ni < static_cast<int> (transposedMelody.notes.size()); ++ni)
             {
-                // Allow anticipation within half a beat of the next note's start
-                const auto& nextNote = transposedMelody.notes[static_cast<size_t> (nextIdx)];
-                if (nextNote.startBeat - progressBeat < 0.5)
-                    candidates.push_back (nextIdx);
+                if (melodyTimedScored.count (ni)) continue;
+                const auto& n = transposedMelody.notes[static_cast<size_t> (ni)];
+                double noteEnd = n.startBeat + n.durationBeats;
+                // Active if within note window (with 0.5 beat coyote time for early/late)
+                if (progressBeat >= n.startBeat - 0.5 && progressBeat < noteEnd + 0.5)
+                    candidates.push_back (ni);
             }
 
-            bool scored = false;
             for (int candIdx : candidates)
             {
-                if (scored) break;
                 const auto& note = transposedMelody.notes[static_cast<size_t> (candIdx)];
                 int candPC = ((melodyKeyRootMidi + note.intervalFromKeyRoot) % 12 + 12) % 12;
 
@@ -3072,7 +3096,6 @@ void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
                     if (pc == candPC)
                     {
                         melodyTimedScored.insert (candIdx);
-                        scored = true;
                         practiceMLChart.setNoteState (candIdx, MelodyChartComponent::NoteState::Correct);
 
                         // Use absolute offset from note start (negative = early, positive = late)
@@ -3179,36 +3202,63 @@ void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
         return;
     }
 
-    // Step 4: Check new notes against target
-    const auto& target = transposedMelody.notes[static_cast<size_t> (melodyNoteIndex)];
-    int targetPC = (melodyKeyRootMidi + target.intervalFromKeyRoot) % 12;
-    if (targetPC < 0) targetPC += 12;
-
-    bool gotCorrect = false;
-
-    for (int pc : newNoteOns)
+    // Step 4: Check new notes against target AND overlapping notes
+    // Build candidates: current note + any overlapping notes ahead
+    std::vector<int> candidates;
+    for (int ni = melodyNoteIndex; ni < static_cast<int> (transposedMelody.notes.size()); ++ni)
     {
-        if (pc == targetPC)
-            gotCorrect = true;
+        const auto& n = transposedMelody.notes[static_cast<size_t> (ni)];
+        // In untimed mode, check from melodyNoteIndex up to a few notes ahead
+        // that could overlap (their start beat <= current note's end beat)
+        if (ni == melodyNoteIndex)
+        {
+            candidates.push_back (ni);
+        }
+        else
+        {
+            // Check if this note overlaps with any previous candidate
+            const auto& prevNote = transposedMelody.notes[static_cast<size_t> (melodyNoteIndex)];
+            if (n.startBeat < prevNote.startBeat + prevNote.durationBeats + 0.5)
+                candidates.push_back (ni);
+            else
+                break;
+        }
     }
 
-    // Step 5: Score and advance — credit correct note even with extra notes
-    if (gotCorrect)
+    bool anyScored = false;
+    for (int candIdx : candidates)
     {
-        melodyNotesCorrect++;
+        const auto& note = transposedMelody.notes[static_cast<size_t> (candIdx)];
+        int notePC = (melodyKeyRootMidi + note.intervalFromKeyRoot) % 12;
+        if (notePC < 0) notePC += 12;
 
-        practiceMLChart.setNoteState (melodyNoteIndex, MelodyChartComponent::NoteState::Correct);
-        lastCorrectPC = targetPC;
-        melodyNoteIndex++;
+        for (int pc : newNoteOns)
+        {
+            if (pc == notePC)
+            {
+                melodyNotesCorrect++;
+                practiceMLChart.setNoteState (candIdx, MelodyChartComponent::NoteState::Correct);
+                lastCorrectPC = notePC;
+                anyScored = true;
 
-        feedbackLabel.setText ("Correct!", juce::dontSendNotification);
-        feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
+                // Advance melodyNoteIndex past all scored notes
+                while (melodyNoteIndex <= candIdx)
+                    melodyNoteIndex++;
 
-        advanceMelodyNote(); // shows next note target or triggers key completion
+                feedbackLabel.setText ("Correct!", juce::dontSendNotification);
+                feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
+                break;
+            }
+        }
+    }
+
+    if (anyScored)
+    {
+        advanceMelodyNote();
         return;
     }
 
-    // Wrong note — don't advance (Step 3 handles keyboard coloring next frame)
+    // Wrong note
     feedbackLabel.setText ("Wrong note!", juce::dontSendNotification);
     feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::danger));
 }
@@ -3254,26 +3304,20 @@ void PracticePanel::updateMelodyBacking()
     currentBackingChordIndex = activeCC;
     const auto& cc = transposedMelody.chordContexts[static_cast<size_t> (activeCC)];
 
-    // Get chord tones for this quality — root position, stacked thirds
-    auto chordTones = ChordDetector::getChordTones (cc.quality);
+    // Play root note only for backing
     int chordRootPC = (melodyKeyRootMidi + cc.intervalFromKeyRoot) % 12;
     if (chordRootPC < 0) chordRootPC += 12;
 
-    // Build from C3 (48) register, root at bottom, intervals stacking upward
     int baseRoot = 48 + chordRootPC;  // root in octave 3
-    if (baseRoot > 54) baseRoot -= 12; // keep root in C3-F#3 range for warmth
+    if (baseRoot > 54) baseRoot -= 12; // keep root in C3-F#3 range
 
     int ch = static_cast<int> (*processorRef.apvts.getRawParameterValue ("midiChannel"));
     backingChordNotes.clear();
 
-    for (int tone : chordTones)
+    if (baseRoot >= 0 && baseRoot < 128)
     {
-        int midiNote = baseRoot + tone;
-        if (midiNote >= 0 && midiNote < 128)
-        {
-            backingChordNotes.push_back (midiNote);
-            processorRef.addPreviewMidi (juce::MidiMessage::noteOn (ch, midiNote, 0.4f));
-        }
+        backingChordNotes.push_back (baseRoot);
+        processorRef.addPreviewMidi (juce::MidiMessage::noteOn (ch, baseRoot, 0.4f));
     }
 }
 
@@ -3593,7 +3637,7 @@ void PracticePanel::checkDrillMastery()
     bool allMastered = true;
     for (int i = 0; i < 12; ++i)
     {
-        if (customAllowedKeys.count (i) && ! drillKeyStates[static_cast<size_t> (i)].mastered())
+        if (customAllowedKeys.count (i) && ! drillKeyStates[static_cast<size_t> (i)].mastered (practiceType))
         {
             allMastered = false;
             break;
@@ -3603,24 +3647,32 @@ void PracticePanel::checkDrillMastery()
     if (! allMastered)
         return;
 
-    // All keys mastered at current BPM -- bump BPM and reset
-    drillBpmLevel++;
-    float newBpm = drillStartBpm + static_cast<float> (drillBpmLevel) * 5.0f;
-    newBpm = juce::jmin (newBpm, 300.0f);
-
-    if (auto* param = processorRef.apvts.getParameter ("bpm"))
+    // All keys mastered at current BPM
+    if (autoBpmToggle.getToggleState())
     {
-        auto range = processorRef.apvts.getParameterRange ("bpm");
-        param->setValueNotifyingHost (range.convertTo0to1 (newBpm));
+        // Auto-increase BPM and reset
+        drillBpmLevel++;
+        float newBpm = drillStartBpm + static_cast<float> (drillBpmLevel) * 5.0f;
+        newBpm = juce::jmin (newBpm, 300.0f);
+
+        if (auto* param = processorRef.apvts.getParameter ("bpm"))
+        {
+            auto range = processorRef.apvts.getParameterRange ("bpm");
+            param->setValueNotifyingHost (range.convertTo0to1 (newBpm));
+        }
+
+        // Reset all key states for new BPM level
+        drillKeyStates = {};
+        lastDrillKey = -1;
+
+        feedbackLabel.setText ("All keys mastered! BPM -> " + juce::String (static_cast<int> (newBpm)),
+                               juce::dontSendNotification);
+        feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
+        return;
     }
 
-    // Reset all key states for new BPM level
-    drillKeyStates = {};
-    lastDrillKey = -1;
-
-    // Show celebration feedback
-    feedbackLabel.setText ("All keys mastered! BPM -> " + juce::String (static_cast<int> (newBpm)),
-                           juce::dontSendNotification);
+    // Auto BPM off: just show celebration, don't change BPM
+    feedbackLabel.setText ("All keys mastered!", juce::dontSendNotification);
     feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
 }
 
@@ -3628,7 +3680,7 @@ int PracticePanel::getDrillMasteredCount() const
 {
     int count = 0;
     for (int i = 0; i < 12; ++i)
-        if (customAllowedKeys.count (i) && drillKeyStates[static_cast<size_t> (i)].mastered())
+        if (customAllowedKeys.count (i) && drillKeyStates[static_cast<size_t> (i)].mastered (practiceType))
             count++;
     return count;
 }

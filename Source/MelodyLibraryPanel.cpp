@@ -158,6 +158,17 @@ MelodyLibraryPanel::MelodyLibraryPanel (AudioPluginAudioProcessor& processor)
     drillStatusLabel.setJustificationType (juce::Justification::centred);
     addChildComponent (drillStatusLabel);
 
+    statsToggleButton.onClick = [this] {
+        showingStatsView = ! showingStatsView;
+        statsToggleButton.setColour (juce::TextButton::buttonColourId,
+            showingStatsView ? juce::Colour (ChordyTheme::accent)
+                             : getLookAndFeel().findColour (juce::TextButton::buttonColourId));
+        if (showingStatsView)
+            refreshAccuracyChart();
+        resized();
+    };
+    addAndMakeVisible (statsToggleButton);
+
     statsChart.onKeyClicked = [this](int keyIndex) {
         if (panelState != PanelState::Idle) return;
         auto id = getSelectedMelodyId();
@@ -337,14 +348,15 @@ void MelodyLibraryPanel::layoutIdleMode (juce::Rectangle<int> area)
     area.removeFromTop (4);
 
     auto bottomRow = area.removeFromBottom (30);
-    int bw = (bottomRow.getWidth() - 12) / 4;
-    recordButton.setBounds (bottomRow.removeFromLeft (bw));
-    bottomRow.removeFromLeft (4);
-    playButton.setBounds (bottomRow.removeFromLeft (bw));
-    bottomRow.removeFromLeft (4);
-    editButton.setBounds (bottomRow.removeFromLeft (bw));
-    bottomRow.removeFromLeft (4);
-    deleteButton.setBounds (bottomRow);
+    deleteButton.setBounds (bottomRow.removeFromRight (55));
+    bottomRow.removeFromRight (4);
+    editButton.setBounds (bottomRow.removeFromRight (40));
+    bottomRow.removeFromRight (4);
+    recordButton.setBounds (bottomRow.removeFromRight (60));
+    bottomRow.removeFromRight (4);
+    statsToggleButton.setBounds (bottomRow.removeFromRight (45));
+    bottomRow.removeFromRight (4);
+    playButton.setBounds (bottomRow.removeFromRight (45));
     area.removeFromBottom (4);
 
     auto statsArea = area.removeFromBottom (60);
@@ -372,6 +384,16 @@ void MelodyLibraryPanel::layoutIdleMode (juce::Rectangle<int> area)
         }
 
         // Accuracy chart fills remaining space
+        accuracyChart.setBounds (area);
+        accuracyChart.setVisible (true);
+    }
+    else if (showingStatsView)
+    {
+        // Stats view mode (non-practice): show accuracy chart instead of list
+        drillStatusLabel.setVisible (false);
+        folderCombo.setVisible (false);
+        searchEditor.setVisible (false);
+        melodyList.setVisible (false);
         accuracyChart.setBounds (area);
         accuracyChart.setVisible (true);
     }
@@ -1172,6 +1194,16 @@ void MelodyLibraryPanel::paintListBoxItem (int rowNumber, juce::Graphics& g,
         g.setColour (juce::Colour (ChordyTheme::textTertiary));
         g.drawText (ctx, 8, 18, width / 2, 14, juce::Justification::centredLeft);
     }
+    // Max practiced BPM badge
+    auto bpms = processorRef.spacedRepetition.getDistinctBpms (m.id);
+    if (! bpms.empty())
+    {
+        g.setColour (juce::Colour (ChordyTheme::textTertiary));
+        g.setFont (11.0f);
+        g.drawText (juce::String (static_cast<int> (bpms.back())) + " bpm",
+                    width / 2, 18, width / 2 - 75, 14, juce::Justification::centredRight);
+    }
+
     if (m.createdAt > 0)
     {
         g.setColour (juce::Colour (ChordyTheme::textSecondary));
@@ -1196,14 +1228,19 @@ void MelodyLibraryPanel::refreshStatsChart()
     }
     else
     {
-        statsChart.setStats (processorRef.spacedRepetition.getStatsForVoicing (selectedId));
+        // Default to max practiced BPM when not practicing
+        auto bpms = processorRef.spacedRepetition.getDistinctBpms (selectedId);
+        if (! bpms.empty())
+            statsChart.setStats (processorRef.spacedRepetition.getStatsForVoicingAtBpm (selectedId, bpms.back()));
+        else
+            statsChart.setStats (processorRef.spacedRepetition.getStatsForVoicing (selectedId));
     }
 }
 
 void MelodyLibraryPanel::refreshAccuracyChart()
 {
     auto selectedId = getSelectedMelodyId();
-    if (selectedId.isEmpty() || ! practiceActive)
+    if (selectedId.isEmpty() || (! practiceActive && ! showingStatsView))
     {
         accuracyChart.clearData();
         return;
@@ -1242,7 +1279,34 @@ void MelodyLibraryPanel::selectedRowsChanged (int)
 {
     int count = getSelectionCount();
     auto id = getSelectedMelodyId();
-    refreshStatsChart();
+
+    if (id.isNotEmpty())
+    {
+        // Set BPM to max practiced BPM for this melody
+        auto bpms = processorRef.spacedRepetition.getDistinctBpms (id);
+        if (! bpms.empty())
+        {
+            float maxBpm = bpms.back();
+            if (auto* param = processorRef.apvts.getParameter ("bpm"))
+            {
+                auto range = processorRef.apvts.getParameterRange ("bpm");
+                param->setValueNotifyingHost (range.convertTo0to1 (maxBpm));
+            }
+            statsChart.setStats (processorRef.spacedRepetition.getStatsForVoicingAtBpm (id, maxBpm));
+        }
+        else
+        {
+            statsChart.setStats (processorRef.spacedRepetition.getStatsForVoicing (id));
+        }
+
+        // Refresh accuracy chart if stats view is open
+        if (showingStatsView)
+            refreshAccuracyChart();
+    }
+    else
+    {
+        statsChart.clearStats();
+    }
 
     // Stop any active playback when selection changes
     processorRef.stopMelodyPlayback();

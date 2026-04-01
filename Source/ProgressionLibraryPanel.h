@@ -71,6 +71,8 @@ private:
     juce::TextButton deleteButton { "Delete" };
     VoicingStatsChart statsChart;
     AccuracyTimeChart accuracyChart;
+    juce::TextButton statsToggleButton { "Stats" };
+    bool showingStatsView = false;
     juce::Label drillStatusLabel;
     bool practiceActive = false;
     bool drillActive = false;

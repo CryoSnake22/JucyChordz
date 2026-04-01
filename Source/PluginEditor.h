@@ -53,9 +53,10 @@ private:
   // Tempo bar
   juce::TextButton settingsToggle { "Settings" };
   bool settingsExpanded = true;
-  juce::Slider bpmSlider;
+  juce::TextButton bpmDownButton { "-" };
+  juce::TextButton bpmUpButton { "+" };
+  juce::Label bpmValueLabel;
   juce::Label bpmLabel;
-  juce::ToggleButton metronomeToggle { "Click" };
   juce::ToggleButton hostSyncToggle { "Sync" };
   BeatIndicatorComponent beatIndicator;
 
@@ -91,8 +92,6 @@ private:
   void openPluginEditor();
   void closePluginEditor();
 
-  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> bpmAttachment;
-  std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> metronomeAttachment;
   std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> hostSyncAttachment;
   std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> synthVolumeAttachment;
   std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> metronomeVolumeAttachment;

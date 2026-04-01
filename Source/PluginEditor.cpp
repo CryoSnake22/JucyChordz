@@ -215,17 +215,36 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
   bpmLabel.setColour(juce::Label::textColourId, juce::Colour(ChordyTheme::textSecondary));
   addAndMakeVisible(bpmLabel);
 
-  bpmSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-  bpmSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 45, 24);
-  bpmSlider.setColour(juce::Slider::textBoxTextColourId, juce::Colour(ChordyTheme::textSecondary));
-  addAndMakeVisible(bpmSlider);
-  bpmAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-      processorRef.apvts, "bpm", bpmSlider);
+  bpmDownButton.onClick = [this] {
+      float bpm = static_cast<float> (*processorRef.apvts.getRawParameterValue ("bpm"));
+      float newBpm = juce::jmax (30.0f, bpm - 5.0f);
+      if (auto* param = processorRef.apvts.getParameter ("bpm"))
+      {
+          auto range = processorRef.apvts.getParameterRange ("bpm");
+          param->setValueNotifyingHost (range.convertTo0to1 (newBpm));
+      }
+  };
+  addAndMakeVisible (bpmDownButton);
 
-  // Toggle colors inherited from LookAndFeel
-  addAndMakeVisible(metronomeToggle);
-  metronomeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-      processorRef.apvts, "metronomeOn", metronomeToggle);
+  bpmUpButton.onClick = [this] {
+      float bpm = static_cast<float> (*processorRef.apvts.getRawParameterValue ("bpm"));
+      float newBpm = juce::jmin (300.0f, bpm + 5.0f);
+      if (auto* param = processorRef.apvts.getParameter ("bpm"))
+      {
+          auto range = processorRef.apvts.getParameterRange ("bpm");
+          param->setValueNotifyingHost (range.convertTo0to1 (newBpm));
+      }
+  };
+  addAndMakeVisible (bpmUpButton);
+
+  bpmValueLabel.setFont (juce::FontOptions (ChordyTheme::fontBody));
+  bpmValueLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::textPrimary));
+  bpmValueLabel.setJustificationType (juce::Justification::centred);
+  addAndMakeVisible (bpmValueLabel);
+
+  // Auto-enable metronome (always on -- no toggle)
+  if (auto* param = processorRef.apvts.getParameter ("metronomeOn"))
+      param->setValueNotifyingHost (1.0f);
 
   // Toggle colors inherited from LookAndFeel
   addAndMakeVisible(hostSyncToggle);
@@ -401,9 +420,10 @@ void AudioPluginAudioProcessorEditor::resized() {
   if (settingsExpanded)
   {
     bpmLabel.setBounds(tempoArea.removeFromLeft(36));
-    bpmSlider.setBounds(tempoArea.removeFromLeft(140));
+    bpmDownButton.setBounds(tempoArea.removeFromLeft(28));
+    bpmValueLabel.setBounds(tempoArea.removeFromLeft(55));
+    bpmUpButton.setBounds(tempoArea.removeFromLeft(28));
     tempoArea.removeFromLeft(8);
-    metronomeToggle.setBounds(tempoArea.removeFromLeft(60));
     metronomeVolumeSlider.setBounds(tempoArea.removeFromLeft(50));
     tempoArea.removeFromLeft(4);
     hostSyncToggle.setBounds(tempoArea.removeFromLeft(60));
@@ -435,8 +455,9 @@ void AudioPluginAudioProcessorEditor::resized() {
     tempoArea.removeFromLeft(8);
 
     bpmLabel.setVisible(true);
-    bpmSlider.setVisible(true);
-    metronomeToggle.setVisible(true);
+    bpmDownButton.setVisible(true);
+    bpmValueLabel.setVisible(true);
+    bpmUpButton.setVisible(true);
     metronomeVolumeSlider.setVisible(true);
     hostSyncToggle.setVisible(true);
     instrumentModeCombo.setVisible(true);
@@ -445,8 +466,9 @@ void AudioPluginAudioProcessorEditor::resized() {
   else
   {
     bpmLabel.setVisible(false);
-    bpmSlider.setVisible(false);
-    metronomeToggle.setVisible(false);
+    bpmDownButton.setVisible(false);
+    bpmValueLabel.setVisible(false);
+    bpmUpButton.setVisible(false);
     metronomeVolumeSlider.setVisible(false);
     hostSyncToggle.setVisible(false);
     instrumentModeCombo.setVisible(false);
@@ -716,7 +738,13 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
   }
 
   // Disable BPM slider when syncing to host
-  bpmSlider.setEnabled(! hostSyncToggle.getToggleState());
+  bool bpmEnabled = ! hostSyncToggle.getToggleState();
+  bpmDownButton.setEnabled (bpmEnabled);
+  bpmUpButton.setEnabled (bpmEnabled);
+
+  // Update BPM display
+  int currentBpm = static_cast<int> (processorRef.tempoEngine.getEffectiveBpm());
+  bpmValueLabel.setText (juce::String (currentBpm) + " BPM", juce::dontSendNotification);
 }
 
 void AudioPluginAudioProcessorEditor::startVoicingPreview (const std::vector<int>& notes,

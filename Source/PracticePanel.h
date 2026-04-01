@@ -127,6 +127,7 @@ private:
     juce::TextButton customButton { "Custom" };
     juce::ToggleButton timedToggle { "Timed" };
     juce::ToggleButton drillToggle { "Drill" };
+    juce::ToggleButton autoBpmToggle { "Auto BPM" };
     juce::Label timingFeedbackLabel;
 
     // Key selector UI (visible when showingKeySelector)
@@ -159,7 +160,7 @@ private:
         int attempts = 0;
         double emaQuality = 0.0;
         bool initialized = false;
-        static constexpr double alpha = 0.4;
+        static constexpr double alpha = 0.5;
 
         void recordQuality (int quality)
         {
@@ -171,9 +172,13 @@ private:
         {
             if (! initialized) return 25.0;
             double w = 5.0 - emaQuality;
-            return std::max (0.1, w * w);
+            return std::max (0.05, w * w * w);
         }
-        bool mastered() const { return attempts >= 3 && emaQuality >= 4.0; }
+        bool mastered (PracticeType type) const
+        {
+            double threshold = (type == PracticeType::Melody) ? 4.0 : 4.5;
+            return attempts >= 3 && emaQuality >= threshold;
+        }
     };
     std::array<DrillKeyState, 12> drillKeyStates {};
     int drillBpmLevel = 0;

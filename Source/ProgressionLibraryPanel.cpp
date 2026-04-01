@@ -141,6 +141,17 @@ ProgressionLibraryPanel::ProgressionLibraryPanel (AudioPluginAudioProcessor& pro
     drillStatusLabel.setJustificationType (juce::Justification::centred);
     addChildComponent (drillStatusLabel);
 
+    statsToggleButton.onClick = [this] {
+        showingStatsView = ! showingStatsView;
+        statsToggleButton.setColour (juce::TextButton::buttonColourId,
+            showingStatsView ? juce::Colour (ChordyTheme::accent)
+                             : getLookAndFeel().findColour (juce::TextButton::buttonColourId));
+        if (showingStatsView)
+            refreshAccuracyChart();
+        resized();
+    };
+    addAndMakeVisible (statsToggleButton);
+
     statsChart.onKeyClicked = [this](int keyIndex) {
         if (panelState != PanelState::Idle) return;
         auto id = getSelectedProgressionId();
@@ -364,14 +375,15 @@ void ProgressionLibraryPanel::layoutIdleMode (juce::Rectangle<int> area)
     area.removeFromTop (4);
 
     auto bottomRow = area.removeFromBottom (30);
-    int bw = (bottomRow.getWidth() - 12) / 4;
-    recordButton.setBounds (bottomRow.removeFromLeft (bw));
-    bottomRow.removeFromLeft (4);
-    playButton.setBounds (bottomRow.removeFromLeft (bw));
-    bottomRow.removeFromLeft (4);
-    editButton.setBounds (bottomRow.removeFromLeft (bw));
-    bottomRow.removeFromLeft (4);
-    deleteButton.setBounds (bottomRow);
+    deleteButton.setBounds (bottomRow.removeFromRight (55));
+    bottomRow.removeFromRight (4);
+    editButton.setBounds (bottomRow.removeFromRight (40));
+    bottomRow.removeFromRight (4);
+    recordButton.setBounds (bottomRow.removeFromRight (60));
+    bottomRow.removeFromRight (4);
+    statsToggleButton.setBounds (bottomRow.removeFromRight (45));
+    bottomRow.removeFromRight (4);
+    playButton.setBounds (bottomRow.removeFromRight (45));
     area.removeFromBottom (4);
 
     // Stats chart
@@ -400,6 +412,16 @@ void ProgressionLibraryPanel::layoutIdleMode (juce::Rectangle<int> area)
         }
 
         // Accuracy chart fills remaining space
+        accuracyChart.setBounds (area);
+        accuracyChart.setVisible (true);
+    }
+    else if (showingStatsView)
+    {
+        // Stats view mode (non-practice): show accuracy chart instead of list
+        drillStatusLabel.setVisible (false);
+        folderCombo.setVisible (false);
+        searchEditor.setVisible (false);
+        progressionList.setVisible (false);
         accuracyChart.setBounds (area);
         accuracyChart.setVisible (true);
     }
@@ -532,6 +554,7 @@ void ProgressionLibraryPanel::setIdleModeVisible (bool v)
     searchEditor.setVisible (v);
     progressionList.setVisible (v);
     statsChart.setVisible (v);
+    statsToggleButton.setVisible (v);
     recordButton.setVisible (v);
     playButton.setVisible (v);
     editButton.setVisible (v);
@@ -1208,6 +1231,18 @@ void ProgressionLibraryPanel::paintListBoxItem (int rowNumber, juce::Graphics& g
         : "";
     g.drawText (dateStr, 8, 18, width / 2, 14, juce::Justification::centredLeft);
 
+    // Max practiced BPM badge
+    auto bpms = processorRef.spacedRepetition.getDistinctBpms (p.id);
+    if (! bpms.empty())
+    {
+        g.setColour (juce::Colour (ChordyTheme::textTertiary));
+        g.setFont (11.0f);
+        g.drawText (juce::String (static_cast<int> (bpms.back())) + " bpm",
+                    width / 2, 18, width / 2 - 95, 14, juce::Justification::centredRight);
+    }
+
+    g.setColour (juce::Colour (ChordyTheme::textSecondary));
+    g.setFont (12.0f);
     juce::String badge = ChordDetector::noteNameFromPitchClass (p.keyPitchClass)
                          + " " + p.mode.substring (0, 3);
     g.drawText (badge, width - 90, 0, 82, height, juce::Justification::centredRight);
@@ -1229,14 +1264,19 @@ void ProgressionLibraryPanel::refreshStatsChart()
     }
     else
     {
-        statsChart.setStats (processorRef.spacedRepetition.getStatsForVoicing (selectedId));
+        // Default to max practiced BPM when not practicing
+        auto bpms = processorRef.spacedRepetition.getDistinctBpms (selectedId);
+        if (! bpms.empty())
+            statsChart.setStats (processorRef.spacedRepetition.getStatsForVoicingAtBpm (selectedId, bpms.back()));
+        else
+            statsChart.setStats (processorRef.spacedRepetition.getStatsForVoicing (selectedId));
     }
 }
 
 void ProgressionLibraryPanel::refreshAccuracyChart()
 {
     auto selectedId = getSelectedProgressionId();
-    if (selectedId.isEmpty() || ! practiceActive)
+    if (selectedId.isEmpty() || (! practiceActive && ! showingStatsView))
     {
         accuracyChart.clearData();
         return;
@@ -1274,17 +1314,44 @@ void ProgressionLibraryPanel::setDrillStatus (bool active, int mastered, int tot
 void ProgressionLibraryPanel::selectedRowsChanged (int)
 {
     int count = getSelectionCount();
-    auto id = getSelectedProgressionId();
-    refreshStatsChart();
+    auto selectedId = getSelectedProgressionId();
 
     // Stop any active playback when selection changes
     processorRef.stopProgressionPlayback();
+
+    if (selectedId.isNotEmpty())
+    {
+        // Set BPM to max practiced BPM for this progression
+        auto bpms = processorRef.spacedRepetition.getDistinctBpms (selectedId);
+        if (! bpms.empty())
+        {
+            float maxBpm = bpms.back();
+            if (auto* param = processorRef.apvts.getParameter ("bpm"))
+            {
+                auto range = processorRef.apvts.getParameterRange ("bpm");
+                param->setValueNotifyingHost (range.convertTo0to1 (maxBpm));
+            }
+            statsChart.setStats (processorRef.spacedRepetition.getStatsForVoicingAtBpm (selectedId, maxBpm));
+        }
+        else
+        {
+            statsChart.setStats (processorRef.spacedRepetition.getStatsForVoicing (selectedId));
+        }
+
+        // Refresh accuracy chart if stats view is open
+        if (showingStatsView)
+            refreshAccuracyChart();
+    }
+    else
+    {
+        statsChart.clearStats();
+    }
 
     playButton.setEnabled (count == 1);
     editButton.setEnabled (count == 1);
 
     if (onSelectionChanged)
-        onSelectionChanged (id);
+        onSelectionChanged (selectedId);
 }
 
 void ProgressionLibraryPanel::listBoxItemClicked (int row, const juce::MouseEvent& e)
