@@ -44,6 +44,7 @@ All source in `Source/`. New `.cpp`/`.h` files **must** be added to `SOURCE_FILE
 - **Avoid UTF-8 special characters** in displayed strings -- JUCE font rendering may not handle them.
 - No test infrastructure yet.
 - Planned: comping rhythm templates, chord interleaving practice mode.
+- **Marketing & deployment in progress** -- freemium model (Lite free / Pro paid) being planned. Lite/Pro feature split not yet finalized. See `.claude/docs/launch-strategy.md` for full strategy. Do not implement feature gating until the split is confirmed.
 
 ## Detailed Context
 
@@ -53,3 +54,4 @@ All source in `Source/`. New `.cpp`/`.h` files **must** be added to `SOURCE_FILE
 @.claude/docs/theme-and-ui.md
 @.claude/docs/recording-and-practice.md
 @.claude/docs/lilypond-export.md
+@.claude/docs/launch-strategy.md
