@@ -2,13 +2,13 @@
 
 ## Context
 
-Chordy is a JUCE-based VST3/AU/Standalone plugin for practicing chord voicings, progressions, and melodies with spaced repetition. No competing plugin combines spaced repetition + per-note scoring + DAW-integrated practice. The plan is freemium: a generous free Lite version for students/teachers, with Pro features (spaced rep, external instruments, melody mode) behind a $49 one-time purchase. Demo content and community seeding come first.
+Chordy is a JUCE-based VST3/AU/Standalone plugin for practicing chord voicings, progressions, and melodies with spaced repetition. No competing plugin combines spaced repetition + per-note scoring + DAW-integrated practice. The plan is freemium: a generous free Lite version for students/teachers, with Pro subscription for ongoing practice features.
 
-**STATUS**: Lite/Pro feature split still being finalized. Do not implement feature gating until the split is confirmed.
+**STATUS**: Lite/Pro feature split still being finalized. Do not implement feature gating until the split is confirmed. Pricing model shifted to subscription (see below).
 
 ---
 
-## Lite (Free) vs Pro ($49) Feature Split (DRAFT -- subject to change)
+## Lite (Free) vs Pro (Subscription) Feature Split (DRAFT -- subject to change)
 
 ### Chordy Lite (Free) -- Genuinely Useful
 
@@ -23,7 +23,7 @@ Chordy is a JUCE-based VST3/AU/Standalone plugin for practicing chord voicings, 
 | MIDI keyboard input | Full range |
 | Basic stats | Accuracy per key chart |
 
-### Chordy Pro ($49) -- Smart Practice + Full Power
+### Chordy Pro (Subscription) -- Smart Practice + Full Power
 
 | Feature | Why it's Pro |
 |---|---|
@@ -39,6 +39,7 @@ Chordy is a JUCE-based VST3/AU/Standalone plugin for practicing chord voicings, 
 ### Why this split works
 - **Lite solves a real problem**: Drill voicings + progressions through keys with a built-in synth. Students and teachers can use it fully without paying.
 - **Pro upgrade is natural**: After weeks of sequential drilling, you *want* spaced rep to stop forgetting. External instruments appeal to serious players. Melody mode adds depth.
+- **Subscription fits the product**: Chordy is a practice platform, not a static tool. Spaced repetition delivers ongoing value that compounds over time -- closer to Melodics or a language learning app than a reverb plugin. Subscription funds ongoing development (comping rhythms, scale patterns, chord interleaving).
 - **Teachers recommend Lite freely**: No barrier to classroom adoption. Students upgrade when ready.
 - **Single binary**: Feature-gated at runtime, not two separate builds.
 
@@ -49,20 +50,21 @@ Chordy is a JUCE-based VST3/AU/Standalone plugin for practicing chord voicings, 
 | Tier | Price |
 |---|---|
 | Chordy Lite | Free forever |
-| Pro launch price (first 2-3 weeks) | $29 |
-| Pro regular price | $49 |
+| Pro monthly | $4/mo |
+| Pro annual | $36/yr (save 25%) |
+| Pro lifetime (optional) | $69-79 one-time (captures "I refuse to subscribe" segment) |
 
-Stable pricing after launch (Valhalla model -- no sales/discounts).
+Lower entry point than one-time $49 drives more initial conversions. Annual plan captures committed users. Lifetime option prevents losing anti-subscription buyers entirely.
 
 ---
 
 ## Distribution
 
-1. **Own website + Lemon Squeezy** -- 5% + $0.50, handles VAT/tax, generates license keys
+1. **Own website + Lemon Squeezy** -- handles subscriptions, VAT/tax, license keys
 2. **KVR product listing** (free) -- discoverability
 3. **Plugin Boutique** (later) -- 30-40% cut, huge audience
 
-**Copy protection**: Simple serial key, validated against Lemon Squeezy API on first entry, cached locally for offline use. No iLok/PACE.
+**Copy protection**: Simple serial key, validated against Lemon Squeezy API on first entry, cached locally. Subscription status checked periodically (with grace period for offline use). No iLok/PACE.
 
 ---
 
@@ -83,34 +85,51 @@ Also create 30-60 sec clips from this for social media (TikTok/Instagram/YouTube
 
 ---
 
-## Launch Strategy
+## Launch Timeline
 
-### Phase 1: Demo Content + Beta Community (START HERE)
+Target: ~6-8 weeks from start to public launch (starting April 2026).
 
-- Record the demo video described above
-- Post in r/jazzpiano, r/musictheory, KVR forums asking for beta testers
-- Reach out to jazz educators (Open Studio Jazz, PianoGroove, Learn Jazz Standards)
-- Educational content: "Why spaced repetition works for learning voicings"
+### Phase 1: Beta-Ready Build (Week 1-2, April 1-14)
 
-### Phase 2: Landing Page + Email List
+- [ ] Daily dogfooding -- use Chordy yourself, note every rough edge, crash, or confusing flow. Fix blockers.
+- [ ] Create installer (.pkg or .dmg) that installs VST3 + AU + Standalone. Beta testers won't build from source.
+- [ ] Ship 3-5 preset voicings (ii-V-I staples: Dm9, G13, Cmaj9, etc.) so first launch isn't a blank screen.
 
-- Landing page with demo video + email signup + "Get Chordy Lite free" button
-- Link from all community posts and video descriptions
-- ~10% of email signups convert to paying customers
+### Phase 2: Beta Community (Week 2-3, April 14-28)
 
-### Phase 3: Launch
+- [ ] Recruit 10-20 beta testers: r/jazzpiano, r/musictheory, KVR forums, jazz Discord servers (Piano World, Jazz Guitar Online). Be honest: "I built a voicing practice plugin with spaced repetition, looking for beta testers."
+- [ ] Set up feedback channel -- Google Form or small Discord server. Collect: instrument, DAW, what broke, what confused them, what they loved.
+- [ ] Iterate for 2-3 weeks on tester feedback. Pay attention to what they don't understand without explanation -- that's what the demo video needs to cover.
 
-- Release Lite + Pro simultaneously
-- $29 intro Pro price for 2-3 weeks
-- Announce: KVR, Reddit, Bedroom Producers Blog, SYNTH ANATOMY
-- YouTube reviewers who cover theory tools -- personalized emails + free Pro license
-- Jazz educator outreach with free classroom Pro licenses
+### Phase 3: Demo Video (Week 4-5, April 28 - May 12)
 
-### Phase 4: Post-Launch
+- [ ] Record main demo (2-3 min) following the workflow in Demo Video Plan below.
+- [ ] Cut 30-60 sec vertical clips for social media (TikTok/Instagram/YouTube Shorts). "Watch me practice a ii-V-I through all 12 keys" is inherently visual.
 
-- $49 regular Pro price
-- Feature updates (comping rhythms, chord interleaving, scale patterns) drive re-engagement
-- Plugin Boutique submission once you have reviews
+### Phase 4: Landing Page + Mailing List (Week 5-6, May 12-26)
+
+- [ ] Landing page: hero with demo video, 3-4 feature bullets, "Download Chordy Lite (Free)" button, email signup for Pro launch. Use Carrd ($19/yr) or simple Next.js on Vercel.
+- [ ] Mailing list: Mailchimp free tier or Buttondown. This is the #1 conversion channel.
+- [ ] KVR product listing (free) -- gets you in front of plugin buyers searching for theory/practice tools.
+- [ ] Reach out to jazz educators (Open Studio Jazz, PianoGroove, Learn Jazz Standards) with beta access.
+
+### Phase 5: Launch (Week 7-8, May 26 - June 9)
+
+- [ ] Implement license system (Lemon Squeezy integration + feature gating) -- only after pricing is finalized.
+- [ ] Release Lite + Pro simultaneously.
+- [ ] Announce: KVR, Reddit, Bedroom Producers Blog, SYNTH ANATOMY.
+- [ ] YouTube reviewers who cover theory tools -- personalized emails + free Pro access.
+- [ ] Jazz educator outreach with free classroom Pro access.
+- [ ] Educational content: "Why spaced repetition works for learning voicings."
+
+### Post-Launch
+
+- Feature updates (comping rhythms, chord interleaving, scale patterns) drive re-engagement and reduce churn.
+- Plugin Boutique submission once you have reviews.
+
+### Critical Path
+
+Build -> Testers -> Video -> Landing Page -> Launch. Each phase depends on the previous -- beta feedback shapes the demo, demo goes on the landing page, landing page collects the audience for launch.
 
 ---
 

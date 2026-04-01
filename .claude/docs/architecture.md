@@ -4,6 +4,7 @@
 
 | File | Purpose |
 |---|---|
+| `AccuracyTimeChart.h/.cpp` | Per-voicing accuracy line chart with BPM stepper. Shows rolling accuracy at selected BPM. |
 | `PluginProcessor.h/.cpp` | Audio/MIDI processing hub. Owns MidiKeyboardState, APVTS, all libraries, engines, synth. |
 | `PluginEditor.h/.cpp` | Top-level GUI. Hosts keyboard, chord display, tabbed library panel, practice panel. 60Hz timer. |
 | `ExternalInstrument.h/.cpp` | VST3/AU plugin hosting. See `.claude/docs/external-instrument.md`. |

@@ -41,6 +41,22 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
     playButton.setEnabled (false);
     addAndMakeVisible (playButton);
 
+    statsButton.onClick = [this] { onStatsToggle(); };
+    addAndMakeVisible (statsButton);
+
+    accuracyChart.onBpmChanged = [this] (float bpm) {
+        // Reload data for the newly selected BPM
+        juce::String id = selectedVoicingId;
+        if (practiceType == PracticeType::Progression) id = selectedProgressionId;
+        else if (practiceType == PracticeType::Melody) id = selectedMelodyId;
+        if (id.isNotEmpty())
+        {
+            auto data = processorRef.spacedRepetition.getDetailedHistory (id, bpm);
+            accuracyChart.setData (data);
+        }
+    };
+    addChildComponent (accuracyChart);
+
     voicingButton.onClick = [this] {
         if (clickedVoicingMatchId.isNotEmpty())
         {
@@ -60,6 +76,12 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
 
     // Toggle colors inherited from LookAndFeel
     addAndMakeVisible (timedToggle);
+    addAndMakeVisible (drillToggle);
+
+    drillStatusLabel.setFont (juce::FontOptions (ChordyTheme::fontSmall));
+    drillStatusLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::accent));
+    drillStatusLabel.setJustificationType (juce::Justification::centred);
+    addChildComponent (drillStatusLabel);
 
     // Key selector toggles (hidden by default)
     static const char* noteNames[] = { "C", "Db", "D", "Eb", "E", "F",
@@ -406,9 +428,26 @@ void PracticePanel::resized()
         area.removeFromBottom (4);
     }
 
+    // Drill status label (above toggle row, visible only when drill active)
+    if (drillActive)
+    {
+        drillStatusLabel.setVisible (true);
+        drillStatusLabel.setBounds (area.removeFromBottom (18));
+        area.removeFromBottom (2);
+    }
+    else
+    {
+        drillStatusLabel.setVisible (false);
+    }
+
     // Toggle row
     auto toggleRow = area.removeFromBottom (24);
-    timedToggle.setBounds (toggleRow.removeFromLeft (toggleRow.getWidth() / 3));
+    int toggleWidth = toggleRow.getWidth() / 4;
+    timedToggle.setBounds (toggleRow.removeFromLeft (toggleWidth));
+    drillToggle.setBounds (toggleRow.removeFromLeft (toggleWidth));
+    // Disable drill for Follow/Scale/Free
+    bool drillAllowed = (rootOrder == RootOrder::Chromatic || rootOrder == RootOrder::Random);
+    drillToggle.setEnabled (drillAllowed && ! practicing);
     if (practiceType == PracticeType::Progression)
     {
         progDetailedToggle.setBounds (toggleRow.removeFromLeft (toggleRow.getWidth() / 2));
@@ -432,12 +471,14 @@ void PracticePanel::resized()
 
     // Button row
     auto buttonRow = area.removeFromBottom (30);
-    int buttonWidth = (buttonRow.getWidth() - 12) / 4;
+    int buttonWidth = (buttonRow.getWidth() - 16) / 5;
     startButton.setBounds (buttonRow.removeFromLeft (buttonWidth));
     buttonRow.removeFromLeft (4);
     nextButton.setBounds (buttonRow.removeFromLeft (buttonWidth));
     buttonRow.removeFromLeft (4);
     playButton.setBounds (buttonRow.removeFromLeft (buttonWidth));
+    buttonRow.removeFromLeft (4);
+    statsButton.setBounds (buttonRow.removeFromLeft (buttonWidth));
     buttonRow.removeFromLeft (4);
     customButton.setBounds (buttonRow);
     area.removeFromBottom (4);
@@ -460,8 +501,17 @@ void PracticePanel::resized()
     bool showProgChart = (practicing && practiceType == PracticeType::Progression) || showingProgPreview;
     bool showMelChart = (practicing && practiceType == PracticeType::Melody) || showingMelPreview;
 
-    if (showProgChart)
+    if (showingStats)
     {
+        // Stats chart takes the full remaining area
+        accuracyChart.setBounds (area);
+        accuracyChart.setVisible (true);
+        practiceChartViewport.setVisible (false);
+        practiceMLChartViewport.setVisible (false);
+    }
+    else if (showProgChart)
+    {
+        accuracyChart.setVisible (false);
         practiceChartViewport.setBounds (area);
         // Tell chart how tall one row should be (fills viewport height)
         practiceChart.setViewportHeight (area.getHeight());
@@ -474,6 +524,7 @@ void PracticePanel::resized()
     }
     else if (showMelChart)
     {
+        accuracyChart.setVisible (false);
         practiceMLChartViewport.setBounds (area);
         practiceMLChart.setViewportHeight (area.getHeight());
         int melIdealH = juce::jmax (1, practiceMLChart.getIdealHeight());
@@ -485,6 +536,7 @@ void PracticePanel::resized()
     }
     else
     {
+        accuracyChart.setVisible (false);
         practiceChartViewport.setBounds (0, 0, 0, 0);
         practiceChartViewport.setVisible (false);
         practiceMLChartViewport.setBounds (0, 0, 0, 0);
@@ -761,6 +813,21 @@ void PracticePanel::startPractice (const juce::String& voicingId)
 
     practiceOctaveRef = voicing->octaveReference;
 
+    // Initialize drill mode if toggled
+    if (drillToggle.getToggleState() && (rootOrder == RootOrder::Chromatic || rootOrder == RootOrder::Random))
+    {
+        drillActive = true;
+        drillKeyStates = {};
+        drillBpmLevel = 0;
+        drillStartBpm = static_cast<float> (*processorRef.apvts.getRawParameterValue ("bpm"));
+        lastDrillKey = -1;
+        updateDrillDisplay();
+    }
+    else
+    {
+        drillActive = false;
+    }
+
     // Build key sequence and get first challenge
     buildCustomKeySequence();
     currentChallenge = getNextCustomChallenge();
@@ -842,6 +909,7 @@ void PracticePanel::stopPractice()
     practicing = false;
     challengeCompleted = false;
     timedPhase = TimedPhase::Inactive;
+    drillActive = false;
     targetNotes.clear();
     practicingVoicingId = {};
     practicingProgressionId = {};
@@ -1383,8 +1451,12 @@ void PracticePanel::updateUntimedPractice (const std::vector<int>& activeNotes)
     if (playedPitchClasses == targetPitchClasses)
     {
         challengeCompleted = true;
-        processorRef.spacedRepetition.recordSuccess (
-            currentChallenge.voicingId, currentChallenge.keyIndex);
+        {
+            float currentBpm = static_cast<float> (processorRef.tempoEngine.getEffectiveBpm());
+            processorRef.spacedRepetition.recordSuccess (
+                currentChallenge.voicingId, currentChallenge.keyIndex, currentBpm);
+        }
+        onDrillScored (currentChallenge.keyIndex, 5);
         feedbackLabel.setText ("Correct!", juce::dontSendNotification);
         feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
 
@@ -1476,8 +1548,12 @@ void PracticePanel::updateTimedPractice (const std::vector<int>& activeNotes)
                 // Correct! Score based on how far into the play phase
                 double beatFraction = beatsElapsed - static_cast<double> (beatInSequence - beatInCycle);
                 int quality = computeQuality (beatFraction, hasWrongAttempt);
-                processorRef.spacedRepetition.recordAttempt (
-                    currentChallenge.voicingId, currentChallenge.keyIndex, quality);
+                {
+                    float currentBpm = static_cast<float> (processorRef.tempoEngine.getEffectiveBpm());
+                    processorRef.spacedRepetition.recordAttempt (
+                        currentChallenge.voicingId, currentChallenge.keyIndex, quality, currentBpm);
+                }
+                onDrillScored (currentChallenge.keyIndex, quality);
                 lastQualityScore = quality;
                 playPhaseScored = true;
 
@@ -1527,8 +1603,12 @@ void PracticePanel::updateTimedPractice (const std::vector<int>& activeNotes)
             if (playedPC == targetPC)
             {
                 // Credit as perfect — they anticipated the change
-                processorRef.spacedRepetition.recordAttempt (
-                    currentChallenge.voicingId, currentChallenge.keyIndex, 5);
+                {
+                    float currentBpm = static_cast<float> (processorRef.tempoEngine.getEffectiveBpm());
+                    processorRef.spacedRepetition.recordAttempt (
+                        currentChallenge.voicingId, currentChallenge.keyIndex, 5, currentBpm);
+                }
+                onDrillScored (currentChallenge.keyIndex, 5);
                 lastQualityScore = 5;
                 playPhaseScored = true;
 
@@ -1587,8 +1667,12 @@ void PracticePanel::enterPrepPhase()
         double proportion = lastAttemptPCs.empty() ? 0.0
             : computeProportionalMatch (lastAttemptPCs, targetPCs);
         int quality = proportionToQuality (proportion);
-        processorRef.spacedRepetition.recordAttempt (
-            currentChallenge.voicingId, currentChallenge.keyIndex, quality);
+        {
+            float currentBpm = static_cast<float> (processorRef.tempoEngine.getEffectiveBpm());
+            processorRef.spacedRepetition.recordAttempt (
+                currentChallenge.voicingId, currentChallenge.keyIndex, quality, currentBpm);
+        }
+        onDrillScored (currentChallenge.keyIndex, quality);
         lastQualityScore = quality;
         feedbackLabel.setText ("Timeout!", juce::dontSendNotification);
         feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::danger));
@@ -1851,8 +1935,12 @@ void PracticePanel::onNext()
             double proportion = lastAttemptPCs.empty() ? 0.0
                 : computeProportionalMatch (lastAttemptPCs, targetPCs);
             int quality = proportionToQuality (proportion);
-            processorRef.spacedRepetition.recordAttempt (
-                currentChallenge.voicingId, currentChallenge.keyIndex, quality);
+            {
+                float currentBpm = static_cast<float> (processorRef.tempoEngine.getEffectiveBpm());
+                processorRef.spacedRepetition.recordAttempt (
+                    currentChallenge.voicingId, currentChallenge.keyIndex, quality, currentBpm);
+            }
+            onDrillScored (currentChallenge.keyIndex, quality);
             updateStats();
         }
         enterPrepPhase();
@@ -1867,8 +1955,12 @@ void PracticePanel::onNext()
             double proportion = lastAttemptPCs.empty() ? 0.0
                 : computeProportionalMatch (lastAttemptPCs, targetPCs);
             int quality = proportionToQuality (proportion);
-            processorRef.spacedRepetition.recordAttempt (
-                currentChallenge.voicingId, currentChallenge.keyIndex, quality);
+            {
+                float currentBpm = static_cast<float> (processorRef.tempoEngine.getEffectiveBpm());
+                processorRef.spacedRepetition.recordAttempt (
+                    currentChallenge.voicingId, currentChallenge.keyIndex, quality, currentBpm);
+            }
+            onDrillScored (currentChallenge.keyIndex, quality);
             feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::danger));
             updateStats();
         }
@@ -2152,6 +2244,20 @@ PracticeChallenge PracticePanel::getNextCustomChallenge()
         return challenge;
     }
 
+    // --- Drill mode: weighted random key selection ---
+    if (drillActive)
+    {
+        int key = pickDrillKey();
+        PracticeChallenge challenge;
+        challenge.voicingId = practicingVoicingId;
+        challenge.keyIndex = key;
+        int semitoneShift = key - (practiceOctaveRef % 12);
+        if (semitoneShift < -6) semitoneShift += 12;
+        if (semitoneShift > 6) semitoneShift -= 12;
+        challenge.rootMidiNote = practiceOctaveRef + semitoneShift;
+        return challenge;
+    }
+
     // --- Single-level loop: Chromatic / Random / Follow(melody) ---
     if (customKeyIndex >= static_cast<int> (customKeySequence.size()))
     {
@@ -2255,6 +2361,21 @@ void PracticePanel::startProgressionPractice (const juce::String& progressionId)
     progressionTimedBeat = 0.0;
     progressionTimedScored.clear();
 
+    // Initialize drill mode
+    if (drillToggle.getToggleState() && (rootOrder == RootOrder::Chromatic || rootOrder == RootOrder::Random))
+    {
+        drillActive = true;
+        drillKeyStates = {};
+        drillBpmLevel = 0;
+        drillStartBpm = static_cast<float> (*processorRef.apvts.getRawParameterValue ("bpm"));
+        lastDrillKey = -1;
+        updateDrillDisplay();
+    }
+    else
+    {
+        drillActive = false;
+    }
+
     // Turn on metronome for timed mode
     if (timedToggle.getToggleState())
     {
@@ -2356,7 +2477,9 @@ void PracticePanel::advanceProgressionChord()
 
         int keyIndex = (processorRef.progressionLibrary.getProgression (practicingProgressionId)->keyPitchClass
                         + progressionKeyOffset) % 12;
-        processorRef.spacedRepetition.recordAttempt (practicingProgressionId, keyIndex, quality);
+        { float bpm = static_cast<float> (processorRef.tempoEngine.getEffectiveBpm());
+        processorRef.spacedRepetition.recordAttempt (practicingProgressionId, keyIndex, quality, bpm); }
+        onDrillScored (keyIndex, quality);
         updateStats();
 
         juce::String scoreText = juce::String (progressionChordsCorrect) + "/"
@@ -2473,7 +2596,9 @@ void PracticePanel::updateProgressionPractice (const std::vector<int>& activeNot
 
             int keyIdx = (processorRef.progressionLibrary.getProgression (practicingProgressionId)->keyPitchClass
                           + progressionKeyOffset) % 12;
-            processorRef.spacedRepetition.recordAttempt (practicingProgressionId, keyIdx, quality);
+            { float bpm = static_cast<float> (processorRef.tempoEngine.getEffectiveBpm());
+            processorRef.spacedRepetition.recordAttempt (practicingProgressionId, keyIdx, quality, bpm); }
+            onDrillScored (keyIdx, quality);
             updateStats();
 
             feedbackLabel.setText ("Complete! " + juce::String (correctNotes) + "/" + juce::String (totalNotes) + " notes",
@@ -2629,6 +2754,21 @@ void PracticePanel::startMelodyPractice (const juce::String& melodyId)
     melodyTimedScored.clear();
     melodyTimedQualitySum = 0;
 
+    // Initialize drill mode
+    if (drillToggle.getToggleState() && (rootOrder == RootOrder::Chromatic || rootOrder == RootOrder::Random))
+    {
+        drillActive = true;
+        drillKeyStates = {};
+        drillBpmLevel = 0;
+        drillStartBpm = static_cast<float> (*processorRef.apvts.getRawParameterValue ("bpm"));
+        lastDrillKey = -1;
+        updateDrillDisplay();
+    }
+    else
+    {
+        drillActive = false;
+    }
+
     // Timed mode setup
     if (timedToggle.getToggleState())
     {
@@ -2734,7 +2874,9 @@ void PracticePanel::advanceMelodyNote()
         }
 
         int keyIndex = transposedMelody.keyPitchClass;
-        processorRef.spacedRepetition.recordAttempt (practicingMelodyId, keyIndex, quality);
+        { float bpm = static_cast<float> (processorRef.tempoEngine.getEffectiveBpm());
+        processorRef.spacedRepetition.recordAttempt (practicingMelodyId, keyIndex, quality, bpm); }
+        onDrillScored (keyIndex, quality);
         updateStats();
 
         juce::String scoreText = juce::String (melodyNotesCorrect) + "/"
@@ -2852,7 +2994,9 @@ void PracticePanel::updateMelodyPractice (const std::vector<int>& activeNotes)
                     juce::roundToInt (static_cast<double> (melodyTimedQualitySum) / totalNotes));
 
             int keyIdx = transposedMelody.keyPitchClass;
-            processorRef.spacedRepetition.recordAttempt (practicingMelodyId, keyIdx, quality);
+            { float bpm = static_cast<float> (processorRef.tempoEngine.getEffectiveBpm());
+            processorRef.spacedRepetition.recordAttempt (practicingMelodyId, keyIdx, quality, bpm); }
+            onDrillScored (keyIdx, quality);
             updateStats();
 
             int scored = static_cast<int> (melodyTimedScored.size());
@@ -3420,4 +3564,167 @@ void PracticePanel::stopExercisePreview()
     exercisePlayButton.setButtonText ("Play");
     keyboardRef.clearAllColours();
     keyboardRef.repaint();
+}
+
+//==============================================================================
+// Accuracy stats chart
+//==============================================================================
+
+void PracticePanel::onStatsToggle()
+{
+    showingStats = ! showingStats;
+    statsButton.setColour (juce::TextButton::buttonColourId,
+        showingStats ? juce::Colour (ChordyTheme::accent)
+                     : getLookAndFeel().findColour (juce::TextButton::buttonColourId));
+
+    if (showingStats)
+        refreshAccuracyChart();
+
+    resized();
+    repaint();
+}
+
+void PracticePanel::refreshAccuracyChart()
+{
+    juce::String id = selectedVoicingId;
+    if (practiceType == PracticeType::Progression) id = selectedProgressionId;
+    else if (practiceType == PracticeType::Melody) id = selectedMelodyId;
+
+    if (id.isEmpty())
+    {
+        accuracyChart.clearData();
+        return;
+    }
+
+    // Get distinct BPMs and set options
+    auto bpms = processorRef.spacedRepetition.getDistinctBpms (id);
+    accuracyChart.setBpmOptions (bpms);
+
+    // Load data for the selected BPM (defaults to highest)
+    float bpm = accuracyChart.getSelectedBpm();
+    auto data = processorRef.spacedRepetition.getDetailedHistory (id, bpm);
+    accuracyChart.setData (data);
+}
+
+//==============================================================================
+// Drill mode
+//==============================================================================
+
+int PracticePanel::pickDrillKey()
+{
+    double totalWeight = 0.0;
+    for (int i = 0; i < 12; ++i)
+        if (i != lastDrillKey && customAllowedKeys.count (i))
+            totalWeight += drillKeyStates[static_cast<size_t> (i)].weight();
+
+    if (totalWeight <= 0.0)
+    {
+        // Fallback: all keys excluded (shouldn't happen), pick any allowed key
+        for (int i = 0; i < 12; ++i)
+            if (customAllowedKeys.count (i))
+                return i;
+        return 0;
+    }
+
+    std::uniform_real_distribution<double> dist (0.0, totalWeight);
+    double roll = dist (rng);
+    double cumulative = 0.0;
+    for (int i = 0; i < 12; ++i)
+    {
+        if (i == lastDrillKey || ! customAllowedKeys.count (i))
+            continue;
+        cumulative += drillKeyStates[static_cast<size_t> (i)].weight();
+        if (roll <= cumulative)
+        {
+            lastDrillKey = i;
+            return i;
+        }
+    }
+    lastDrillKey = 0;
+    return 0;
+}
+
+void PracticePanel::onDrillScored (int keyIndex, int quality)
+{
+    if (! drillActive || keyIndex < 0 || keyIndex >= 12)
+        return;
+
+    drillKeyStates[static_cast<size_t> (keyIndex)].recordQuality (quality);
+    checkDrillMastery();
+    updateDrillDisplay();
+}
+
+void PracticePanel::checkDrillMastery()
+{
+    bool allMastered = true;
+    for (int i = 0; i < 12; ++i)
+    {
+        if (customAllowedKeys.count (i) && ! drillKeyStates[static_cast<size_t> (i)].mastered())
+        {
+            allMastered = false;
+            break;
+        }
+    }
+
+    if (! allMastered)
+        return;
+
+    // All keys mastered at current BPM -- bump BPM and reset
+    drillBpmLevel++;
+    float newBpm = drillStartBpm + static_cast<float> (drillBpmLevel) * 5.0f;
+    newBpm = juce::jmin (newBpm, 300.0f);
+
+    if (auto* param = processorRef.apvts.getParameter ("bpm"))
+    {
+        auto range = processorRef.apvts.getParameterRange ("bpm");
+        param->setValueNotifyingHost (range.convertTo0to1 (newBpm));
+    }
+
+    // Reset all key states for new BPM level
+    drillKeyStates = {};
+    lastDrillKey = -1;
+
+    // Show celebration feedback
+    feedbackLabel.setText ("All keys mastered! BPM -> " + juce::String (static_cast<int> (newBpm)),
+                           juce::dontSendNotification);
+    feedbackLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::success));
+}
+
+void PracticePanel::resetDrillState()
+{
+    drillActive = false;
+    drillKeyStates = {};
+    drillBpmLevel = 0;
+    lastDrillKey = -1;
+}
+
+void PracticePanel::updateDrillDisplay()
+{
+    if (! drillActive)
+    {
+        drillStatusLabel.setVisible (false);
+        return;
+    }
+
+    int masteredCount = 0;
+    int totalKeys = 0;
+    for (int i = 0; i < 12; ++i)
+    {
+        if (customAllowedKeys.count (i))
+        {
+            totalKeys++;
+            if (drillKeyStates[static_cast<size_t> (i)].mastered())
+                masteredCount++;
+        }
+    }
+
+    float currentBpm = drillStartBpm + static_cast<float> (drillBpmLevel) * 5.0f;
+    juce::String status = juce::String (masteredCount) + "/" + juce::String (totalKeys) + " mastered";
+    if (drillBpmLevel > 0)
+        status += " | BPM " + juce::String (static_cast<int> (currentBpm))
+                  + " (+" + juce::String (drillBpmLevel * 5) + ")";
+
+    drillStatusLabel.setText (status, juce::dontSendNotification);
+    drillStatusLabel.setVisible (true);
+    resized();
 }

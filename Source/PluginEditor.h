@@ -103,7 +103,7 @@ private:
   // Voicing preview playback
   std::vector<int> previewNotes;
   int previewFramesRemaining = 0;
-  static constexpr int previewDurationFrames = 30; // ~0.5s hold, then release envelope fades
+  static constexpr int previewDurationFrames = 90; // ~1.5s hold, outlasts audio playback
 
   // Keyboard highlight auto-clear when browsing voicings (~4s at 60Hz)
   int keyboardHighlightFramesRemaining = 0;

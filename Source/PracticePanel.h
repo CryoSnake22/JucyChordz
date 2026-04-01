@@ -8,6 +8,7 @@
 #include "ProgressionChartComponent.h"
 #include "MelodyModel.h"
 #include "MelodyChartComponent.h"
+#include "AccuracyTimeChart.h"
 #include "ScaleModel.h"
 #include <set>
 #include <random>
@@ -119,8 +120,11 @@ private:
     juce::TextButton startButton { "Start" };
     juce::TextButton nextButton { "Next" };
     juce::TextButton playButton { "Play" };
+    juce::TextButton statsButton { "Stats" };
     juce::TextButton customButton { "Custom" };
     juce::ToggleButton timedToggle { "Timed" };
+    juce::ToggleButton drillToggle { "Drill" };
+    juce::Label drillStatusLabel;
     juce::Label timingFeedbackLabel;
 
     // Key selector UI (visible when showingKeySelector)
@@ -146,6 +150,38 @@ private:
     std::vector<int> customKeySequence;
     int customKeyIndex = 0;
     std::mt19937 rng { std::random_device{}() };
+
+    // Drill mode state (weighted random key selection with BPM escalation)
+    bool drillActive = false;
+    struct DrillKeyState {
+        int attempts = 0;
+        double emaQuality = 0.0;
+        bool initialized = false;
+        static constexpr double alpha = 0.4;
+
+        void recordQuality (int quality)
+        {
+            attempts++;
+            if (! initialized) { emaQuality = quality; initialized = true; }
+            else { emaQuality = alpha * quality + (1.0 - alpha) * emaQuality; }
+        }
+        double weight() const
+        {
+            if (! initialized) return 25.0;
+            double w = 5.0 - emaQuality;
+            return std::max (0.1, w * w);
+        }
+        bool mastered() const { return attempts >= 3 && emaQuality >= 4.0; }
+    };
+    std::array<DrillKeyState, 12> drillKeyStates {};
+    int drillBpmLevel = 0;
+    float drillStartBpm = 120.0f;
+    int lastDrillKey = -1;
+    int pickDrillKey();
+    void onDrillScored (int keyIndex, int quality);
+    void checkDrillMastery();
+    void resetDrillState();
+    void updateDrillDisplay();
 
     // Follow/Scale mode state
     ScaleType selectedScaleType = ScaleType::Major;
@@ -227,6 +263,12 @@ private:
     juce::ToggleButton backingToggle { "Backing" };
     std::vector<int> backingChordNotes;
     int currentBackingChordIndex = -1;
+
+    // --- Accuracy stats chart ---
+    AccuracyTimeChart accuracyChart;
+    bool showingStats = false;
+    void onStatsToggle();
+    void refreshAccuracyChart();
 
     std::set<int> lastAttemptPCs;  // last notes user played (for proportional scoring on skip/timeout)
 

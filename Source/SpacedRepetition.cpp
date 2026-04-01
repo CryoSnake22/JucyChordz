@@ -1,6 +1,7 @@
 #include "SpacedRepetition.h"
 #include <algorithm>
 #include <cmath>
+#include <set>
 
 static double currentTimeSeconds()
 {
@@ -112,10 +113,19 @@ PracticeRecord& SpacedRepetitionEngine::getOrCreateRecord (
 // --- Public API ---
 
 void SpacedRepetitionEngine::recordSuccess (const juce::String& voicingId,
-                                             int keyIndex)
+                                             int keyIndex, float bpm)
 {
     auto& r = getOrCreateRecord (voicingId, keyIndex);
     applySuccess (r);
+
+    AttemptEntry entry;
+    entry.quality = 5.0;
+    entry.bpm = bpm;
+    entry.timestamp = currentTimeSeconds();
+    r.detailedHistory.push_back (entry);
+    if (r.detailedHistory.size() > 500)
+        r.detailedHistory.erase (r.detailedHistory.begin(),
+            r.detailedHistory.begin() + static_cast<std::ptrdiff_t> (r.detailedHistory.size() - 500));
 }
 
 void SpacedRepetitionEngine::recordFailure (const juce::String& voicingId,
@@ -126,10 +136,20 @@ void SpacedRepetitionEngine::recordFailure (const juce::String& voicingId,
 }
 
 void SpacedRepetitionEngine::recordAttempt (const juce::String& voicingId,
-                                            int keyIndex, int quality)
+                                            int keyIndex, int quality, float bpm)
 {
     auto& r = getOrCreateRecord (voicingId, keyIndex);
     applyQuality (r, quality);
+
+    // Also store in detailed history for BPM-differentiated stats
+    AttemptEntry entry;
+    entry.quality = static_cast<double> (quality);
+    entry.bpm = bpm;
+    entry.timestamp = currentTimeSeconds();
+    r.detailedHistory.push_back (entry);
+    if (r.detailedHistory.size() > 500)
+        r.detailedHistory.erase (r.detailedHistory.begin(),
+            r.detailedHistory.begin() + static_cast<std::ptrdiff_t> (r.detailedHistory.size() - 500));
 }
 
 PracticeChallenge SpacedRepetitionEngine::getNextChallenge (
@@ -286,6 +306,44 @@ double SpacedRepetitionEngine::getAccuracy() const
     return static_cast<double> (getTotalSuccesses()) / attempts;
 }
 
+// --- Detailed history queries ---
+
+std::vector<AttemptEntry> SpacedRepetitionEngine::getDetailedHistory (
+    const juce::String& voicingId, float bpm) const
+{
+    std::vector<AttemptEntry> result;
+    for (const auto& r : records)
+    {
+        if (r.voicingId != voicingId)
+            continue;
+        for (const auto& entry : r.detailedHistory)
+        {
+            if (bpm < 0.0f || std::abs (entry.bpm - bpm) < 0.1f)
+                result.push_back (entry);
+        }
+    }
+    // Sort by timestamp
+    std::sort (result.begin(), result.end(),
+        [] (const AttemptEntry& a, const AttemptEntry& b) { return a.timestamp < b.timestamp; });
+    return result;
+}
+
+std::vector<float> SpacedRepetitionEngine::getDistinctBpms (const juce::String& voicingId) const
+{
+    std::set<int> bpmSet;
+    for (const auto& r : records)
+    {
+        if (r.voicingId != voicingId)
+            continue;
+        for (const auto& entry : r.detailedHistory)
+            bpmSet.insert (static_cast<int> (entry.bpm));
+    }
+    std::vector<float> result;
+    for (int b : bpmSet)
+        result.push_back (static_cast<float> (b));
+    return result;
+}
+
 // --- Serialization ---
 
 static const juce::Identifier ID_SpacedRepetition ("SpacedRepetition");
@@ -299,6 +357,7 @@ static const juce::Identifier ID_interval ("interval");
 static const juce::Identifier ID_ease ("ease");
 static const juce::Identifier ID_quality ("quality");
 static const juce::Identifier ID_attemptHistory ("attemptHistory");
+static const juce::Identifier ID_detailedHistory ("detailedHistory");
 
 juce::ValueTree SpacedRepetitionEngine::toValueTree() const
 {
@@ -322,6 +381,17 @@ juce::ValueTree SpacedRepetitionEngine::toValueTree() const
             for (double q : r.attemptHistory)
                 histParts.add (juce::String (q, 1));
             child.setProperty (ID_attemptHistory, histParts.joinIntoString (","), nullptr);
+        }
+
+        // Serialize detailedHistory as "quality:bpm:timestamp;..." compact string
+        if (! r.detailedHistory.empty())
+        {
+            juce::StringArray entries;
+            for (const auto& e : r.detailedHistory)
+                entries.add (juce::String (e.quality, 1) + ":"
+                             + juce::String (static_cast<int> (e.bpm)) + ":"
+                             + juce::String (e.timestamp, 0));
+            child.setProperty (ID_detailedHistory, entries.joinIntoString (";"), nullptr);
         }
 
         tree.appendChild (child, nullptr);
@@ -355,6 +425,25 @@ void SpacedRepetitionEngine::fromValueTree (const juce::ValueTree& tree)
                 for (const auto& p : parts)
                     if (p.trim().isNotEmpty())
                         r.attemptHistory.push_back (p.getDoubleValue());
+            }
+
+            // Deserialize detailedHistory ("quality:bpm:timestamp;...")
+            juce::String detailedStr = child.getProperty (ID_detailedHistory).toString();
+            if (detailedStr.isNotEmpty())
+            {
+                auto entries = juce::StringArray::fromTokens (detailedStr, ";", "");
+                for (const auto& entry : entries)
+                {
+                    auto fields = juce::StringArray::fromTokens (entry, ":", "");
+                    if (fields.size() >= 3)
+                    {
+                        AttemptEntry ae;
+                        ae.quality = fields[0].getDoubleValue();
+                        ae.bpm = static_cast<float> (fields[1].getDoubleValue());
+                        ae.timestamp = fields[2].getDoubleValue();
+                        r.detailedHistory.push_back (ae);
+                    }
+                }
             }
 
             records.push_back (r);

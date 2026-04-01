@@ -4,6 +4,13 @@
 #include <array>
 #include <vector>
 
+struct AttemptEntry
+{
+    double quality = 0.0;     // 0-5
+    float bpm = 120.0f;       // BPM at time of attempt
+    double timestamp = 0.0;   // seconds since epoch
+};
+
 struct PracticeRecord
 {
     juce::String voicingId;
@@ -15,6 +22,7 @@ struct PracticeRecord
     double easeFactor = 2.5;
     int lastResponseQuality = -1; // -1 = no data, 0-5 SM-2 quality
     std::vector<double> attemptHistory; // per-attempt quality scores (0-5), capped at 100
+    std::vector<AttemptEntry> detailedHistory; // full history with BPM + timestamp, capped at 500
 };
 
 struct PracticeChallenge
@@ -30,12 +38,12 @@ public:
     SpacedRepetitionEngine() = default;
 
     // Record a practice result
-    void recordSuccess (const juce::String& voicingId, int keyIndex);
+    void recordSuccess (const juce::String& voicingId, int keyIndex, float bpm = 120.0f);
     void recordFailure (const juce::String& voicingId, int keyIndex);
 
     // Quality-based recording (0-5, full SM-2 scale)
     // 0=timeout, 1=wrong then corrected, 2=slow, 3=ok, 4=good, 5=perfect
-    void recordAttempt (const juce::String& voicingId, int keyIndex, int quality);
+    void recordAttempt (const juce::String& voicingId, int keyIndex, int quality, float bpm = 120.0f);
 
     // Get the next challenge for a given voicing (picks the most-overdue key)
     // avoidKey: if >= 0, skip this key to prevent consecutive repeats
@@ -74,6 +82,10 @@ public:
     };
 
     std::array<KeyStats, 12> getStatsForVoicing (const juce::String& voicingId) const;
+
+    // Per-voicing detailed history queries (for accuracy stats chart)
+    std::vector<AttemptEntry> getDetailedHistory (const juce::String& voicingId, float bpm = -1.0f) const;
+    std::vector<float> getDistinctBpms (const juce::String& voicingId) const;
 
     // Global stats
     int getTotalAttempts() const;

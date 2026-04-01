@@ -16,7 +16,7 @@ AudioPluginAudioProcessor::createParameterLayout() {
   // Tempo engine parameters
   layout.add(std::make_unique<juce::AudioParameterFloat>(
       juce::ParameterID{"bpm", 1}, "BPM",
-      juce::NormalisableRange<float>(30.0f, 300.0f, 0.1f), 120.0f));
+      juce::NormalisableRange<float>(30.0f, 300.0f, 5.0f), 120.0f));
 
   layout.add(std::make_unique<juce::AudioParameterBool>(
       juce::ParameterID{"metronomeOn", 1}, "Metronome", false));

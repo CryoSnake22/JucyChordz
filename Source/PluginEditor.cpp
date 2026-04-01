@@ -567,8 +567,16 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
   melodyLibraryPanel.updateRecording(notes);
   melodyLibraryPanel.updateTimerCallback();
 
+  // Actively maintain keyboard highlights during voicing preview (self-sustaining regardless of playback state)
+  if (previewFramesRemaining > 0 && !previewNotes.empty()) {
+    keyboard.clearAllColours();
+    for (int note : previewNotes)
+      keyboard.setKeyColour(note, KeyColour::Target);
+    keyboard.repaint();
+  }
+
   // Highlight keyboard during progression/melody playback
-  if ((processorRef.isPlayingProgression() || processorRef.isPlayingMelody()) && !practicePanel.isPracticing() && previewNotes.empty()) {
+  else if ((processorRef.isPlayingProgression() || processorRef.isPlayingMelody()) && !practicePanel.isPracticing() && previewNotes.empty()) {
     uint64_t pLow = processorRef.playbackNotesLow.load(std::memory_order_relaxed);
     uint64_t pHigh = processorRef.playbackNotesHigh.load(std::memory_order_relaxed);
     keyboard.clearAllColours();
@@ -626,8 +634,8 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
       stopVoicingPreview();
   }
 
-  // Keyboard highlight auto-clear when browsing voicings
-  if (keyboardHighlightFramesRemaining > 0 && ! practicePanel.isPracticing()) {
+  // Keyboard highlight auto-clear when browsing voicings (skip during active preview)
+  if (keyboardHighlightFramesRemaining > 0 && ! practicePanel.isPracticing() && previewNotes.empty()) {
     if (--keyboardHighlightFramesRemaining == 0) {
       keyboard.clearAllColours();
       keyboard.repaint();
@@ -751,11 +759,8 @@ void AudioPluginAudioProcessorEditor::stopVoicingPreview()
   for (int note : previewNotes)
     processorRef.addPreviewMidi (juce::MidiMessage::noteOff (channel, note, 0.0f));
 
-  // Keep light green highlights after playback
-  keyboard.clearAllColours();
-  for (int note : previewNotes)
-    keyboard.setKeyColour (note, KeyColour::Target);
-  keyboard.repaint();
+  // Transition to browsing highlight timer -- highlights persist briefly then auto-clear
+  keyboardHighlightFramesRemaining = keyboardHighlightTimeout;
 
   previewNotes.clear();
   previewFramesRemaining = 0;

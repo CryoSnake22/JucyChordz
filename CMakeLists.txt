@@ -15,7 +15,8 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 
-set(SOURCE_FILES Source/BeatIndicatorComponent.cpp Source/BeatIndicatorComponent.h
+set(SOURCE_FILES Source/AccuracyTimeChart.cpp Source/AccuracyTimeChart.h
+                 Source/BeatIndicatorComponent.cpp Source/BeatIndicatorComponent.h
                  Source/ChordDetector.cpp Source/ChordDetector.h
                  Source/ExportSheetMusicDialog.cpp Source/ExportSheetMusicDialog.h
                  Source/FolderModel.cpp Source/FolderModel.h
