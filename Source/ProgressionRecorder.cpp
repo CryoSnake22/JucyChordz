@@ -124,52 +124,28 @@ std::vector<ProgressionChord> ProgressionRecorder::groupNotesIntoChords (
     if (notes.empty())
         return chords;
 
-    // Group notes into chords by note-on clustering.
-    // A new chord starts when there's a gap in note-on times (> 0.5 beats since
-    // the last note-on in the current group). This prevents long held notes from
-    // merging separate chords together.
+    // No automatic chord grouping — put all notes in a single group.
+    // Users manually add chord boundaries in edit mode if desired.
+    // Per-note timing is preserved for practice scoring.
     struct ChordGroup
     {
         std::vector<size_t> noteIndices;
         double earliestStart = 1e9;
         double latestEnd = 0.0;
-        double lastNoteOnTime = 0.0;  // most recent note-on in this group
     };
 
-    static constexpr double chordGapThreshold = 0.5; // beats between note-ons to split chords
-
-    std::vector<ChordGroup> groups;
-    ChordGroup currentGroup;
-
+    ChordGroup singleGroup;
     for (size_t i = 0; i < notes.size(); ++i)
     {
-        const auto& n = notes[i];
-        double noteEnd = n.startBeat + n.durationBeats;
-
-        // A note joins the current chord if its start is close to the last note-on
-        // in this group (within threshold). Long held notes don't extend the window.
-        bool isNewChord = ! currentGroup.noteIndices.empty()
-            && (n.startBeat - currentGroup.lastNoteOnTime) >= chordGapThreshold;
-
-        if (currentGroup.noteIndices.empty() || ! isNewChord)
-        {
-            currentGroup.noteIndices.push_back (i);
-            currentGroup.earliestStart = std::min (currentGroup.earliestStart, n.startBeat);
-            currentGroup.latestEnd = std::max (currentGroup.latestEnd, noteEnd);
-            currentGroup.lastNoteOnTime = std::max (currentGroup.lastNoteOnTime, n.startBeat);
-        }
-        else
-        {
-            groups.push_back (currentGroup);
-            currentGroup = {};
-            currentGroup.noteIndices.push_back (i);
-            currentGroup.earliestStart = n.startBeat;
-            currentGroup.latestEnd = noteEnd;
-            currentGroup.lastNoteOnTime = n.startBeat;
-        }
+        singleGroup.noteIndices.push_back (i);
+        singleGroup.earliestStart = std::min (singleGroup.earliestStart, notes[i].startBeat);
+        singleGroup.latestEnd = std::max (singleGroup.latestEnd,
+            notes[i].startBeat + notes[i].durationBeats);
     }
-    if (! currentGroup.noteIndices.empty())
-        groups.push_back (currentGroup);
+
+    std::vector<ChordGroup> groups;
+    if (! singleGroup.noteIndices.empty())
+        groups.push_back (singleGroup);
 
     // Convert each group into a ProgressionChord
     for (const auto& group : groups)
@@ -210,33 +186,8 @@ std::vector<ProgressionChord> ProgressionRecorder::groupNotesIntoChords (
                 chord.intervals.push_back (note - bassNote);
         }
 
-        // Detect chord quality
-        if (voicingLibrary != nullptr)
-        {
-            juce::String displayName;
-            auto* match = voicingLibrary->findByNotes (chord.midiNotes, displayName);
-            if (match != nullptr)
-            {
-                chord.linkedVoicingId = match->id;
-                chord.name = match->name;
-                chord.quality = match->quality;
-                chord.alterations = match->alterations;
-                chord.rootPitchClass = match->rootPitchClass;
-            }
-        }
-
-        if (chord.name.isEmpty())
-        {
-            auto result = ChordDetector::detect (chord.midiNotes);
-            if (result.isValid())
-            {
-                chord.rootPitchClass = result.rootPitchClass;
-                chord.quality = result.quality;
-                chord.name = result.displayName;
-            }
-            else if (! chord.midiNotes.empty())
-                chord.name = ChordDetector::noteNameFromPitchClass (chord.rootPitchClass) + "?";
-        }
+        // No automatic chord name detection — leave name empty by default.
+        // Users can manually label chords in edit mode.
 
         chords.push_back (chord);
     }

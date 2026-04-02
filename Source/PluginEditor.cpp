@@ -237,10 +237,36 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
   };
   addAndMakeVisible (bpmUpButton);
 
-  bpmValueLabel.setFont (juce::FontOptions (ChordyTheme::fontBody));
-  bpmValueLabel.setColour (juce::Label::textColourId, juce::Colour (ChordyTheme::textPrimary));
-  bpmValueLabel.setJustificationType (juce::Justification::centred);
-  addAndMakeVisible (bpmValueLabel);
+  bpmValueEditor.setFont (juce::FontOptions (ChordyTheme::fontBody));
+  bpmValueEditor.setColour (juce::TextEditor::textColourId, juce::Colour (ChordyTheme::textPrimary));
+  bpmValueEditor.setColour (juce::TextEditor::backgroundColourId, juce::Colours::transparentBlack);
+  bpmValueEditor.setColour (juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
+  bpmValueEditor.setColour (juce::TextEditor::focusedOutlineColourId, juce::Colour (ChordyTheme::accent));
+  bpmValueEditor.setJustification (juce::Justification::centred);
+  bpmValueEditor.setInputRestrictions (3, "0123456789");
+  bpmValueEditor.onReturnKey = [this] {
+      int val = bpmValueEditor.getText().getIntValue();
+      float snapped = static_cast<float> (juce::jlimit (30, 300, ((val + 2) / 5) * 5));
+      if (auto* param = processorRef.apvts.getParameter ("bpm"))
+      {
+          auto range = processorRef.apvts.getParameterRange ("bpm");
+          param->setValueNotifyingHost (range.convertTo0to1 (snapped));
+      }
+      bpmValueEditor.moveKeyboardFocusToSibling (false);
+  };
+  bpmValueEditor.onFocusLost = [this] {
+      int val = bpmValueEditor.getText().getIntValue();
+      if (val > 0)
+      {
+          float snapped = static_cast<float> (juce::jlimit (30, 300, ((val + 2) / 5) * 5));
+          if (auto* param = processorRef.apvts.getParameter ("bpm"))
+          {
+              auto range = processorRef.apvts.getParameterRange ("bpm");
+              param->setValueNotifyingHost (range.convertTo0to1 (snapped));
+          }
+      }
+  };
+  addAndMakeVisible (bpmValueEditor);
 
   // Auto-enable metronome (always on -- no toggle)
   if (auto* param = processorRef.apvts.getParameter ("metronomeOn"))
@@ -421,7 +447,7 @@ void AudioPluginAudioProcessorEditor::resized() {
   {
     bpmLabel.setBounds(tempoArea.removeFromLeft(36));
     bpmDownButton.setBounds(tempoArea.removeFromLeft(28));
-    bpmValueLabel.setBounds(tempoArea.removeFromLeft(55));
+    bpmValueEditor.setBounds(tempoArea.removeFromLeft(55));
     bpmUpButton.setBounds(tempoArea.removeFromLeft(28));
     tempoArea.removeFromLeft(8);
     metronomeVolumeSlider.setBounds(tempoArea.removeFromLeft(50));
@@ -456,7 +482,7 @@ void AudioPluginAudioProcessorEditor::resized() {
 
     bpmLabel.setVisible(true);
     bpmDownButton.setVisible(true);
-    bpmValueLabel.setVisible(true);
+    bpmValueEditor.setVisible(true);
     bpmUpButton.setVisible(true);
     metronomeVolumeSlider.setVisible(true);
     hostSyncToggle.setVisible(true);
@@ -467,7 +493,7 @@ void AudioPluginAudioProcessorEditor::resized() {
   {
     bpmLabel.setVisible(false);
     bpmDownButton.setVisible(false);
-    bpmValueLabel.setVisible(false);
+    bpmValueEditor.setVisible(false);
     bpmUpButton.setVisible(false);
     metronomeVolumeSlider.setVisible(false);
     hostSyncToggle.setVisible(false);
@@ -744,7 +770,8 @@ void AudioPluginAudioProcessorEditor::timerCallback() {
 
   // Update BPM display
   int currentBpm = static_cast<int> (processorRef.tempoEngine.getEffectiveBpm());
-  bpmValueLabel.setText (juce::String (currentBpm) + " BPM", juce::dontSendNotification);
+  if (! bpmValueEditor.hasKeyboardFocus (false))
+      bpmValueEditor.setText (juce::String (currentBpm), false);
 }
 
 void AudioPluginAudioProcessorEditor::startVoicingPreview (const std::vector<int>& notes,

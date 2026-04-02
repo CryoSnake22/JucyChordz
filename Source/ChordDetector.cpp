@@ -168,7 +168,7 @@ ChordResult ChordDetector::detect (const std::vector<int>& midiNotes)
             // Bass note is the strongest signal for root in jazz voicings
             int score = static_cast<int> (tmpl.intervals.size()) * 10;
             if (candidateRoot == bassPitchClass)
-                score += 30;
+                score += 50;
 
             if (score > bestScore)
             {

@@ -44,4 +44,4 @@
 
 - **Chord display center**: Always shows detected chord (keyboard, playback, or clicked preview). Never blocked by practice.
 - **Left overlay**: "Key: X" (36pt amber) during practice. Countdown below. "Up next: G" below chord display.
-- **Tempo bar**: Collapsible via Settings toggle. Contains instrument mode (Internal/External), plugin selector, Scan/Open buttons, volume sliders, metronome volume.
+- **Tempo bar**: Collapsible via Settings toggle. BPM shown as `[-][value][+]` buttons (5 BPM increments, editable text field snaps to nearest 5). Metronome auto-enabled (no toggle, volume slider only). Contains instrument mode (Internal/External), plugin selector, Scan/Open buttons, volume sliders.

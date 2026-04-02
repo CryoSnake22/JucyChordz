@@ -60,9 +60,32 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
 
     // Toggle colors inherited from LookAndFeel
     addAndMakeVisible (timedToggle);
+    drillToggle.onClick = [this] {
+        if (practicing) return;
+        // Drill ON: open custom for inv/drop if not already open
+        if (drillToggle.getToggleState())
+        {
+            if (! showingKeySelector)
+            {
+                showingKeySelector = true;
+                customMode = true;
+                customButton.setColour (juce::TextButton::buttonColourId, juce::Colour (ChordyTheme::accentMuted));
+            }
+        }
+        else
+        {
+            // Drill OFF: close custom if it was opened by drill
+            showingKeySelector = false;
+            customMode = false;
+            customButton.setColour (juce::TextButton::buttonColourId,
+                getLookAndFeel().findColour (juce::TextButton::buttonColourId));
+        }
+        resized();
+        repaint();
+    };
     addAndMakeVisible (drillToggle);
     autoBpmToggle.setToggleState (true, juce::dontSendNotification); // default on
-    addChildComponent (autoBpmToggle);
+    addAndMakeVisible (autoBpmToggle);
 
     // Key selector toggles (hidden by default)
     static const char* noteNames[] = { "C", "Db", "D", "Eb", "E", "F",
@@ -135,7 +158,8 @@ PracticePanel::PracticePanel (AudioPluginAudioProcessor& processor,
     practiceChartViewport.setVisible (false);
     addAndMakeVisible (practiceChartViewport);
 
-    progDetailedToggle.setToggleState (true, juce::dontSendNotification);
+    progDetailedToggle.setVisible (false); // deprecated — always detailed
+    practiceChart.setDetailedView (true);
     progDetailedToggle.onClick = [this] {
         practiceChart.setDetailedView (progDetailedToggle.getToggleState());
         resized();
@@ -332,11 +356,38 @@ void PracticePanel::resized()
         feedbackLabel.setBounds (0, 0, 0, 0);
 
     // Key selector (conditionally visible)
-    // Drill mode overrides key selector — drill owns key selection
-    if (drillActive)
-        showingKeySelector = false;
+    bool drillOn = drillActive || drillToggle.getToggleState();
 
-    if (showingKeySelector)
+    // When drill is on, hide key toggles + All/None/order but keep custom area for inv/drop/autoBPM
+    if (drillOn && showingKeySelector)
+    {
+        // Hide key selection controls (drill is random-only)
+        for (int i = 0; i < 12; ++i)
+            keyToggles[i].setVisible (false);
+        selectAllButton.setVisible (false);
+        deselectAllButton.setVisible (false);
+        orderCombo.setVisible (false);
+        scalePickerCombo.setVisible (false);
+        followSourceCombo.setVisible (false);
+        melodyPickerCombo.setVisible (false);
+        exercisePlayButton.setVisible (false);
+    }
+    else if (! showingKeySelector)
+    {
+        // Explicitly hide all key selector components
+        for (int i = 0; i < 12; ++i)
+            keyToggles[i].setVisible (false);
+        selectAllButton.setVisible (false);
+        deselectAllButton.setVisible (false);
+        orderCombo.setVisible (false);
+        scalePickerCombo.setVisible (false);
+        followSourceCombo.setVisible (false);
+        melodyPickerCombo.setVisible (false);
+        exercisePlayButton.setVisible (false);
+        if (! drillOn)
+            autoBpmToggle.setVisible (false);
+    }
+    else // showingKeySelector && !drillOn — normal custom mode
     {
         int orderId = orderCombo.getSelectedId();
         bool isFollow = (orderId == 3);
@@ -390,42 +441,18 @@ void PracticePanel::resized()
                 keyToggles[i].setBounds (keyRow1.removeFromLeft (kw));
         }
 
-        // Inversion / Drop row (voicing practice only, inside custom)
-        bool showInvDrop = (practiceType == PracticeType::Voicing)
-                        && (inversionCombo.getNumItems() > 0);
-        if (showInvDrop)
-        {
-            area.removeFromBottom (2);
-            auto invDropRow = area.removeFromBottom (24);
-            int halfW = (invDropRow.getWidth() - 4) / 2;
-            inversionCombo.setBounds (invDropRow.removeFromLeft (halfW));
-            invDropRow.removeFromLeft (4);
-            dropCombo.setBounds (invDropRow);
-            inversionCombo.setVisible (true);
-            dropCombo.setVisible (true);
-        }
-        else
-        {
-            inversionCombo.setVisible (false);
-            dropCombo.setVisible (false);
-        }
-
         area.removeFromBottom (4);
     }
 
-    // Toggle row
+    // Toggle row: always 3 columns so Drill doesn't shift position
     auto toggleRow = area.removeFromBottom (24);
-    int numToggles = 3; // Timed, Drill, + one of Detailed/Backing/AutoBPM
-    if (drillActive) numToggles = 3; // Timed, Drill, Auto BPM
-    int toggleWidth = toggleRow.getWidth() / numToggles;
+    int toggleWidth = toggleRow.getWidth() / 3;
     timedToggle.setBounds (toggleRow.removeFromLeft (toggleWidth));
     drillToggle.setBounds (toggleRow.removeFromLeft (toggleWidth));
-    // Disable drill for Follow/Scale/Free
     bool drillAllowed = (rootOrder == RootOrder::Chromatic || rootOrder == RootOrder::Random);
     drillToggle.setEnabled (drillAllowed && ! practicing);
 
-    // Show Auto BPM when drill is active, else show practice-type-specific toggle
-    if (drillActive)
+    if (drillOn)
     {
         autoBpmToggle.setVisible (true);
         autoBpmToggle.setBounds (toggleRow);
@@ -435,25 +462,31 @@ void PracticePanel::resized()
     else
     {
         autoBpmToggle.setVisible (false);
-        if (practiceType == PracticeType::Progression)
-        {
-            progDetailedToggle.setBounds (toggleRow.removeFromLeft (toggleRow.getWidth() / 2));
-            progDetailedToggle.setVisible (true);
-        }
-        else
-        {
-            progDetailedToggle.setVisible (false);
-        }
+        progDetailedToggle.setVisible (false);
         backingToggle.setVisible (practiceType == PracticeType::Melody);
         backingToggle.setBounds (toggleRow);
     }
     area.removeFromBottom (4);
 
-    // Hide inv/drop when not in custom mode
-    if (! showingKeySelector)
+    // Inversion / Drop — always visible for voicing practice, between buttons and toggles
     {
-        inversionCombo.setVisible (false);
-        dropCombo.setVisible (false);
+        bool showInvDrop = (practiceType == PracticeType::Voicing)
+                        && (inversionCombo.getNumItems() > 0);
+        if (showInvDrop)
+        {
+            auto invDropRow = area.removeFromBottom (24);
+            inversionCombo.setBounds (invDropRow.removeFromLeft (invDropRow.getWidth() / 2 - 2));
+            invDropRow.removeFromLeft (4);
+            dropCombo.setBounds (invDropRow);
+            inversionCombo.setVisible (true);
+            dropCombo.setVisible (true);
+            area.removeFromBottom (4);
+        }
+        else
+        {
+            inversionCombo.setVisible (false);
+            dropCombo.setVisible (false);
+        }
     }
 
     // Button row
@@ -466,7 +499,7 @@ void PracticePanel::resized()
     playButton.setBounds (buttonRow.removeFromLeft (buttonWidth));
     buttonRow.removeFromLeft (4);
     customButton.setBounds (buttonRow);
-    customButton.setEnabled (! drillActive || ! practicing);
+    customButton.setEnabled (! drillOn);
     area.removeFromBottom (4);
 
     // Target label + voicing button share the same row area
@@ -752,6 +785,9 @@ void PracticePanel::onStartStop()
         }
     }
 
+    // Remember custom state to restore after practice
+    customWasOpenBeforePractice = showingKeySelector;
+
     // Turn metronome on only for timed mode
     if (timedToggle.getToggleState())
         if (auto* param = processorRef.apvts.getParameter ("metronomeOn"))
@@ -802,6 +838,9 @@ void PracticePanel::startPractice (const juce::String& voicingId)
     {
         drillActive = false;
     }
+
+    // Force layout update to hide key picker when drill is active
+    resized();
 
     // Build key sequence and get first challenge
     buildCustomKeySequence();
@@ -886,6 +925,10 @@ void PracticePanel::stopPractice()
     challengeCompleted = false;
     timedPhase = TimedPhase::Inactive;
     drillActive = false;
+
+    // Restore custom panel state
+    showingKeySelector = customWasOpenBeforePractice;
+    customMode = customWasOpenBeforePractice;
     targetNotes.clear();
     practicingVoicingId = {};
     practicingProgressionId = {};

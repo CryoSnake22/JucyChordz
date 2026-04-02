@@ -55,7 +55,7 @@ private:
   bool settingsExpanded = true;
   juce::TextButton bpmDownButton { "-" };
   juce::TextButton bpmUpButton { "+" };
-  juce::Label bpmValueLabel;
+  juce::TextEditor bpmValueEditor;
   juce::Label bpmLabel;
   juce::ToggleButton hostSyncToggle { "Sync" };
   BeatIndicatorComponent beatIndicator;

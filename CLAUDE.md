@@ -40,11 +40,15 @@ All source in `Source/`. New `.cpp`/`.h` files **must** be added to `SOURCE_FILE
 - **Audio thread** (`processBlock`): no allocations, no blocking, no locks. Exceptions: `lastPlayedNotes` mutex (only when notes active), `previewMidiLock` SpinLock (brief), `pluginLock` CriticalSection (ScopedTryLock).
 - **Playback uses raw MIDI replay** by default. Only reconstruct from analyzed data when transposition requires it.
 - **Quantize always re-analyzes from raw MIDI** (non-destructive). Switching between Raw/Beat/1/2/1/4 never destroys the original recording.
+- **No auto chord grouping** in progressions. All notes go in one group with no label. Users manually add chord boundaries in edit mode.
 - **Per-note independent scoring**, never chord-level. See `.claude/docs/recording-and-practice.md`.
+- **Drill mode**: Weighted random key selection (cubic formula, EMA alpha=0.5). Per-practice-type mastery thresholds (80% melody, 90% voicing/progression). Auto BPM increment by 5. Drill disables Custom and hides key picker.
+- **BPM in steps of 5**: Parameter uses step size 5. UI shows [-][value][+] buttons with editable text field.
+- **Inversion/Drop always visible** for voicing practice (not gated by Custom mode).
 - **Avoid UTF-8 special characters** in displayed strings -- JUCE font rendering may not handle them.
 - No test infrastructure yet.
 - Planned: comping rhythm templates, chord interleaving practice mode.
-- **Marketing & deployment in progress** -- freemium model (Lite free / Pro paid) being planned. Lite/Pro feature split not yet finalized. See `.claude/docs/launch-strategy.md` for full strategy. Do not implement feature gating until the split is confirmed.
+- **Marketing & deployment in progress** -- subscription model being planned. See `.claude/docs/launch-strategy.md` for full strategy. Do not implement feature gating until the split is confirmed.
 
 ## Detailed Context
 

@@ -10,6 +10,8 @@
 
 **ProgressionNote** (in ProgressionRecorder.h): `midiNote`, `velocity`, `startBeat`, `durationBeats` -- intermediate struct for `extractNotes()` pipeline.
 
+**AttemptEntry** (in SpacedRepetition.h): `quality` (0-5), `bpm` (float), `timestamp` (seconds since epoch). Stored in `PracticeRecord::detailedHistory` (capped at 500). Used for BPM-differentiated accuracy stats.
+
 **Progression**: `id`, `name`, `keyPitchClass`, `mode`, `chords`, `totalBeats`, `bpm`, `timeSignatureNum/Den`, `rawMidi` (MidiMessageSequence), `quantizeResolution` (0=raw, 1.0=beat, 0.5=half, 0.25=quarter), `folderId`, `createdAt`
 
 **MelodyNote**: `intervalFromKeyRoot`, `startBeat`, `durationBeats`, `velocity`
@@ -26,8 +28,8 @@ Melody note intervals are relative to `keyPitchClass` -- transposition shifts ke
 |---|---|---|---|---|
 | `practiceMode` | Bool | -- | false | Practice mode flag |
 | `midiChannel` | Int | 1-16 | 1 | MIDI channel |
-| `bpm` | Float | 30-300 | 120 | Internal metronome tempo |
-| `metronomeOn` | Bool | -- | false | Enable click |
+| `bpm` | Float | 30-300 (step 5) | 120 | Internal metronome tempo |
+| `metronomeOn` | Bool | -- | false | Metronome (auto-enabled, no UI toggle) |
 | `useHostSync` | Bool | -- | false | Sync to DAW transport |
 | `timedPractice` | Bool | -- | false | Enable timed scoring |
 | `responseWindowBeats` | Float | 1-8 | 4 | Beats before timeout |
@@ -41,5 +43,6 @@ Melody note intervals are relative to `keyPitchClass` -- transposition shifts ke
 - Raw MIDI stored as compact `"time:byte1:byte2:byte3;..."` string.
 - Velocities stored as comma-separated int strings.
 - Each library's ValueTree includes a `<Folders>` child. `folderId` and `createdAt` attributes backward compatible (empty/0 defaults).
+- **Detailed history**: `AttemptEntry` serialized as `"quality:bpm:timestamp;..."` compact string per PracticeRecord. Backward compatible (empty = no data for old records).
 - **Shared library file**: Also saved to `~/Library/Chordy/libraries.xml` for DAW-Standalone sync. Loaded on construction, saved on every library modification, practice stop, and plugin destruction.
 - **`.chordy` collection format**: `<ChordyCollection>` root with `<VoicingLibrary>`, `<ProgressionLibrary>`, `<MelodyLibrary>` sections. UUID-based duplicate skipping on import. Folders preserved.

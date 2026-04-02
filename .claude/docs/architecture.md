@@ -13,14 +13,14 @@
 | `ChordySynth.h/.cpp` | Built-in 2-operator FM piano synth, 12-voice polyphony. |
 | `TempoEngine.h/.cpp` | Audio-thread tempo engine. Internal BPM clock, optional DAW sync, metronome click. |
 | `BeatIndicatorComponent.h/.cpp` | Visual 4-dot beat indicator with BPM display. |
-| `ChordDetector.h/.cpp` | Pitch-class template matching (triads through 13ths). Bass note +30 root bonus. |
+| `ChordDetector.h/.cpp` | Pitch-class template matching (triads through 13ths). Bass note +50 root bonus. |
 | `ChordyKeyboardComponent.h/.cpp` | MidiKeyboardComponent subclass with colored key overlays (green/red/teal). |
 | `FolderModel.h/.cpp` | Folder struct + FolderLibrary with ValueTree serialization. |
 | `VoicingModel.h/.cpp` | Voicing struct + VoicingLibrary. findByNotes(), createFromNotes(), applyInversion(), applyDrop(). |
 | `ProgressionModel.h/.cpp` | ProgressionChord (per-note timing) + Progression struct + ProgressionLibrary. |
 | `ProgressionRecorder.h/.cpp` | MIDI recording with beat-relative timestamps. Two-phase analysis pipeline. |
 | `MelodyModel.h/.cpp` | MelodyNote + MelodyChordContext + Melody struct + MelodyLibrary. |
-| `SpacedRepetition.h/.cpp` | SM-2 engine with recency-weighted accuracy. |
+| `SpacedRepetition.h/.cpp` | SM-2 engine with recency-weighted accuracy. Per-attempt `AttemptEntry` with BPM + timestamp for drill stats. |
 | `ScaleModel.h/.cpp` | Scale definitions (incl. Bebop Major/Dominant), voicingFitsInScale(), diatonicTranspose(). |
 | `VoicingStatsChart.h/.cpp` | 12-bar chart (C-B) showing per-key accuracy. Click-to-play callback. |
 | `VoicingLibraryPanel.h/.cpp` | Voicing management: 4-state flow, multi-select, folders, MIDI/.chordy import/export. |
@@ -28,7 +28,7 @@
 | `MelodyLibraryPanel.h/.cpp` | Melody management: 5-state machine, chord context editor. |
 | `ProgressionChartComponent.h/.cpp` | Dual-mode chart: detailed (piano-roll) and simple (chord rects). Draggable end marker. |
 | `MelodyChartComponent.h/.cpp` | Note-on-beat-grid renderer. Row wrapping, note states, draggable end marker. |
-| `PracticePanel.h/.cpp` | Practice GUI for voicing/progression/melody. 5 order modes (incl. Free), inversion/drop transforms, scoring, chart preview. |
+| `PracticePanel.h/.cpp` | Practice GUI for voicing/progression/melody. 5 order modes (incl. Free), inversion/drop transforms, drill mode with weighted random key selection, scoring, chart preview. |
 | `MidiFileUtils.h/.cpp` | MIDI file import/export (480 TPQ, beat-relative timestamps). |
 | `LibraryExporter.h/.cpp` | .chordy XML collection format for sharing libraries. |
 | `LilyPondExporter.h/.cpp` | LilyPond .ly generation + PDF rendering. See `.claude/docs/lilypond-export.md`. |

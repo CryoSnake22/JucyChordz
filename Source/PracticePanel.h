@@ -132,6 +132,7 @@ private:
 
     // Key selector UI (visible when showingKeySelector)
     bool showingKeySelector = false;
+    bool customWasOpenBeforePractice = false;
     juce::ToggleButton keyToggles[12];
     juce::TextButton selectAllButton { "All" };
     juce::TextButton deselectAllButton { "None" };
